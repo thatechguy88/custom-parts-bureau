@@ -724,7 +724,7 @@ html, body {
 // ═══════════════════════════════════════════════════════════════
 // MOCK DATA
 // ═══════════════════════════════════════════════════════════════
-const jobs = [
+let jobs = [
   {
     id: "Q-20260619-BRACV2",
     filename: "bracket_v2.stl",
@@ -1244,7 +1244,7 @@ supports contact the model.`,
 ];
 
 // ─── Notifications ───
-const notifications = [
+let notifications = [
   { type: "success", icon: "✅", text: "cube_case.stl printed & shipped — tracking: TB-2026-0001", time: "06:42" },
   { type: "success", icon: "✅", text: "bracket_v1.stl printed & shipped — tracking: TB-2026-0002", time: "07:38" },
   { type: "success", icon: "✅", text: "bracket_v3.stl marked complete — best margin today 42.9%", time: "08:18" },
@@ -1261,6 +1261,46 @@ const notifications = [
   { type: "info", icon: "🔔", text: "New job paid: cable_clamp.stl — $2.90 — queued", time: "12:07" },
   { type: "warning", icon: "⚠️", text: "phone_stand.stl — 32.1% overhang, heavy supports needed", time: "12:34" },
 ];
+
+// ══════════════════════════════════════════════════════════════
+// LIVE DATA FETCH
+// ═══════════════════════════════════════════════════════════════
+let fetchInProgress = false;
+async function fetchData() {
+    if (fetchInProgress) return false;
+    fetchInProgress = true;
+    try {
+        const response = await fetch('results.json', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        jobs = data.jobs;
+        notifications = data.notifications;
+        // Optionally update stats if needed
+        return true;
+    } catch (err) {
+        console.warn('Failed to fetch results.json:', err);
+        return false;
+    } finally {
+        fetchInProgress = false;
+    }
+}
+
+function updateUI() {
+    renderMetrics();
+    renderKanban();
+    renderNotifications();
+    if (selectedJobId) {
+        selectJob(printingJob.id);
+    }
+}
+
+async function refreshData() {
+    const updated = await fetchData();
+    if (updated) {
+        updateUI();
+    }
+}
+
 
 // ─── Chat responses ───
 const chatResponses = {
@@ -1649,16 +1689,21 @@ function simulateProgress() {
 // ═══════════════════════════════════════════════════════════════
 
 function init() {
-  renderMetrics();
-  renderKanban();
-  renderNotifications();
-  initChat();
-
-  // Auto-select the printing job
-  selectJob('Q-20260619-BRACV2');
+  // Initial data fetch
+  refreshData().then(() => {
+    // Auto-select the printing job or first job
+    const printingJob = jobs.find(j => j.status === 'printing');
+    if (printingJob) {
+      selectJob(printingJob.id);
+    } else if (jobs.length > 0) {
+      selectJob(jobs[0].id);
+    }
+  });
 
   // Simulate printing progress every 8 seconds
   setInterval(simulateProgress, 8000);
+  // Fetch live data every 2 seconds
+  setInterval(refreshData, 2000);
 }
 
 document.addEventListener('DOMContentLoaded', init);
