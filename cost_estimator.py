@@ -1,0 +1,184 @@
+"""
+Cost Estimator — 3D printing cost calculation module.
+
+Estimates material, machine, and support costs based on geometry analysis.
+Implements confidence-based dynamic pricing.
+
+Part of "The Custom Parts Bureau" — Hermes Agent hackathon project.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+from stl_analyzer import GeometryAnalysis
+
+
+# ---------------------------------------------------------------------------
+# Default pricing parameters (USD)
+# ---------------------------------------------------------------------------
+DEFAULT_FILAMENT_PRICE_PER_CM3: float = 0.03       # PLA $0.03/cm³
+DEFAULT_MACHINE_RATE_PER_HOUR: float = 4.00          # $4/hr
+DEFAULT_SUPPORT_MATERIAL_PRICE_PER_CM3: float = 0.05 # $0.05/cm³
+DEFAULT_BASE_MARGIN: float = 0.30                    # 30%
+DEFAULT_ESTIMATED_PRINT_SPEED_CM3_PER_HOUR: float = 12.0  # ~12 cm³/hr typical
+SUPPORT_VOLUME_FRACTION: float = 0.15  # assume supports ≈ 15% of overhang volume
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CostBreakdown:
+    """Itemised cost breakdown for a 3D print job."""
+    material_cost_usd: float = 0.0
+    machine_cost_usd: float = 0.0
+    support_cost_usd: float = 0.0
+    subtotal_usd: float = 0.0
+    margin_pct: float = 0.0
+    margin_amount_usd: float = 0.0
+    total_usd: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "material_cost_usd": round(self.material_cost_usd, 4),
+            "machine_cost_usd": round(self.machine_cost_usd, 4),
+            "support_cost_usd": round(self.support_cost_usd, 4),
+            "subtotal_usd": round(self.subtotal_usd, 4),
+            "margin_pct": round(self.margin_pct, 2),
+            "margin_amount_usd": round(self.margin_amount_usd, 4),
+            "total_usd": round(self.total_usd, 4),
+        }
+
+
+@dataclass
+class EstimateContext:
+    """Additional context about the estimate for reporting."""
+    estimated_print_time_hours: float = 0.0
+    material_grams_estimated: float = 0.0  # PLA density ~1.24 g/cm³
+    confidence_adjusted_margin: bool = False
+    base_margin_pct: float = DEFAULT_BASE_MARGIN
+    confidence: float = 100.0
+
+
+# ---------------------------------------------------------------------------
+# Cost estimation
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CostEstimate:
+    """Complete cost estimate result."""
+    breakdown: CostBreakdown = field(default_factory=CostBreakdown)
+    context: EstimateContext = field(default_factory=EstimateContext)
+
+    def to_dict(self) -> dict:
+        return {
+            "breakdown": self.breakdown.to_dict(),
+            "context": {
+                "estimated_print_time_hours": round(self.context.estimated_print_time_hours, 2),
+                "material_grams_estimated": round(self.context.material_grams_estimated, 2),
+                "confidence_adjusted_margin": self.context.confidence_adjusted_margin,
+                "base_margin_pct": round(self.context.base_margin_pct, 2),
+                "confidence": round(self.context.confidence, 1),
+            },
+        }
+
+
+def estimate_cost(
+    analysis: GeometryAnalysis,
+    filament_price_cm3: float = DEFAULT_FILAMENT_PRICE_PER_CM3,
+    machine_rate_hr: float = DEFAULT_MACHINE_RATE_PER_HOUR,
+    support_price_cm3: float = DEFAULT_SUPPORT_MATERIAL_PRICE_PER_CM3,
+    base_margin: float = DEFAULT_BASE_MARGIN,
+    print_speed_cm3_hr: float = DEFAULT_ESTIMATED_PRINT_SPEED_CM3_PER_HOUR,
+) -> CostEstimate:
+    """Estimate 3D printing cost based on geometry analysis.
+
+    Parameters
+    ----------
+    analysis : GeometryAnalysis
+        Output from ``stl_analyzer.analyze_stl``.
+    filament_price_cm3 : float
+        Filament cost per cm³ in USD.
+    machine_rate_hr : float
+        Machine operating cost per hour in USD.
+    support_price_cm3 : float
+        Support material cost per cm³ in USD.
+    base_margin : float
+        Base profit margin as a fraction (0.30 = 30%).
+    print_speed_cm3_hr
+        Estimated print speed in cm³ per hour.
+
+    Returns
+    -------
+    CostEstimate
+        Full cost breakdown with context.
+    """
+    volume_cm3 = analysis.volume_cm3
+    overhang_pct = analysis.overhang.overhang_percentage / 100.0
+
+    # --- Material cost ---
+    material_cost = volume_cm3 * filament_price_cm3
+
+    # --- Machine time cost ---
+    # Estimate print time from volume and print speed
+    print_time_hours = volume_cm3 / print_speed_cm3_hr if print_speed_cm3_hr > 0 else 1.0
+    # Adjust for complexity: more overhangs = more retractions = slower
+    complexity_multiplier = 1.0 + (overhang_pct * 0.5)  # up to 1.5x for extreme overhang
+    print_time_hours *= complexity_multiplier
+    machine_cost = print_time_hours * machine_rate_hr
+
+    # --- Support material cost ---
+    # Supports are needed for overhangs; estimate support volume
+    support_volume_cm3 = volume_cm3 * overhang_pct * SUPPORT_VOLUME_FRACTION
+    support_cost = support_volume_cm3 * support_price_cm3
+
+    # --- Subtotal ---
+    subtotal = material_cost + machine_cost + support_cost
+
+    # --- Confidence-based margin adjustment ---
+    confidence = analysis.structural_confidence
+    confidence_adjusted = False
+    adjusted_margin = base_margin
+
+    if confidence < 50.0:
+        # Low confidence → significantly higher margin to cover risk of failure
+        risk_surcharge = (50.0 - confidence) / 50.0 * 0.50  # up to 50% extra
+        adjusted_margin = base_margin + risk_surcharge
+        confidence_adjusted = True
+    elif confidence < 70.0:
+        # Moderate confidence → slight increase
+        risk_surcharge = (70.0 - confidence) / 20.0 * 0.20  # up to 20% extra
+        adjusted_margin = base_margin + risk_surcharge
+        confidence_adjusted = True
+
+    adjusted_margin = min(adjusted_margin, 0.80)  # cap at 80%
+
+    margin_amount = subtotal * adjusted_margin
+    total = subtotal + margin_amount
+
+    # --- PLA density estimate ---
+    PLA_DENSITY_G_CM3 = 1.24
+    material_grams = volume_cm3 * PLA_DENSITY_G_CM3
+
+    breakdown = CostBreakdown(
+        material_cost_usd=material_cost,
+        machine_cost_usd=machine_cost,
+        support_cost_usd=support_cost,
+        subtotal_usd=subtotal,
+        margin_pct=adjusted_margin * 100.0,
+        margin_amount_usd=margin_amount,
+        total_usd=total,
+    )
+
+    context = EstimateContext(
+        estimated_print_time_hours=print_time_hours,
+        material_grams_estimated=material_grams,
+        confidence_adjusted_margin=confidence_adjusted,
+        base_margin_pct=base_margin * 100.0,
+        confidence=confidence,
+    )
+
+    return CostEstimate(breakdown=breakdown, context=context)

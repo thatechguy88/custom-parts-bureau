@@ -1,0 +1,9 @@
+__pycache__/
+.env
+venv/
+*.pyc
+.DS_Store
+DASHBOARD-SPEC.md
+OPUS-CONTEXT.md
+generate_tests.py
+pipeline_test.py

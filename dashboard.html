@@ -1,0 +1,1667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>The Custom Parts Bureau — P&amp;L Dashboard</title>
+<meta name="description" content="Financial Brain for Autonomous Manufacturing — Real-time P&L dashboard for AI-powered 3D printing operations.">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+/* ─── Reset & Base ─── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  height: 100vh;
+  overflow: hidden;
+  background: #0a0a0a;
+  color: #c0c0c0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #1a1a2e; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #00ff4140; }
+
+/* ─── Layout ─── */
+#app {
+  display: grid;
+  grid-template-rows: 72px 1fr 270px 26px;
+  height: 100vh;
+  width: 100%;
+}
+
+/* ─── Top Bar ─── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid #1a1a2e;
+  background: linear-gradient(180deg, #0d1117 0%, #0a0a0a 100%);
+  min-height: 72px;
+  overflow: visible;
+  position: relative;
+  z-index: 10;
+}
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #00ff41;
+  letter-spacing: 3px;
+  text-shadow: 0 0 20px #00ff4140, 0 0 40px #00ff4115;
+}
+.brand-sub {
+  font-size: 9px;
+  color: #555;
+  letter-spacing: 1.5px;
+  margin-top: -2px;
+}
+.metrics {
+  display: flex;
+  gap: 32px;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  position: relative;
+}
+.metric-label {
+  font-size: 9px;
+  color: #555;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.metric-value.green { color: #00ff41; text-shadow: 0 0 15px #00ff4130; }
+.metric-value.cyan { color: #00d4ff; text-shadow: 0 0 15px #00d4ff30; }
+.metric-value.yellow { color: #ffd700; text-shadow: 0 0 15px #ffd70030; }
+.metric-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+  margin-top: 2px;
+}
+.metric-spark .bar {
+  width: 4px;
+  background: #00d4ff40;
+  border-radius: 1px;
+  transition: height 0.3s ease;
+}
+
+/* ─── Main Content ─── */
+.main-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  overflow: hidden;
+  border-bottom: 1px solid #1a1a2e;
+}
+
+/* ─── Panel Shared ─── */
+.panel {
+  border-right: 1px solid #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel:last-child { border-right: none; }
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1a2e;
+  background: #0d1117;
+  flex-shrink: 0;
+}
+.panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #00d4ff;
+  text-transform: uppercase;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* ─── Kanban Queue ─── */
+.kanban {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
+  height: 100%;
+}
+.kanban-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.kanban-col-header {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 8px 8px 6px;
+  text-transform: uppercase;
+  border-bottom: 2px solid;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kanban-col-header .count {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.6;
+}
+.col-paid .kanban-col-header { color: #ffd700; border-color: #ffd700; }
+.col-printing .kanban-col-header { color: #00d4ff; border-color: #00d4ff; }
+.col-completed .kanban-col-header { color: #00ff41; border-color: #00ff41; }
+.col-hold .kanban-col-header { color: #ff4444; border-color: #ff4444; }
+
+.kanban-cards {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ─── Job Card ─── */
+.job-card {
+  background: #111;
+  border: 1px solid #1a1a2e;
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.job-card:hover {
+  border-color: #00d4ff60;
+  background: #0d1117;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 12px #00d4ff10;
+}
+.job-card.selected {
+  border-color: #00d4ff;
+  background: #0a1628;
+  box-shadow: 0 0 12px #00d4ff20, inset 0 0 20px #00d4ff05;
+}
+.job-card .filename {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.job-card .meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+}
+.job-card .amount {
+  color: #00ff41;
+  font-weight: 600;
+}
+.job-card .confidence-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.confidence-high { background: #00ff4120; color: #00ff41; }
+.confidence-mid { background: #ffd70020; color: #ffd700; }
+.confidence-low { background: #ff444420; color: #ff4444; }
+
+.job-card .time-ago {
+  font-size: 9px;
+  color: #555;
+  margin-top: 3px;
+}
+
+/* Progress bar for printing */
+.progress-bar-outer {
+  width: 100%;
+  height: 4px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.progress-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4ff, #00ff41);
+  border-radius: 2px;
+  transition: width 1s linear;
+  box-shadow: 0 0 8px #00d4ff60;
+}
+
+/* ─── Detail Panel ─── */
+.detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #333;
+  gap: 8px;
+}
+.detail-empty .icon { font-size: 32px; opacity: 0.3; }
+.detail-empty .text { font-size: 11px; letter-spacing: 1px; }
+
+.detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Geometry Info */
+.geometry-info {
+  background: #0d1117;
+  border: 1px solid #1a1a2e;
+  border-radius: 4px;
+  padding: 12px;
+}
+.geometry-info .geo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.geometry-info .geo-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #00d4ff;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.geo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.geo-stat {
+  text-align: center;
+}
+.geo-stat .label {
+  font-size: 8px;
+  color: #555;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.geo-stat .value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin-top: 2px;
+}
+.bounding-box-display {
+  margin-top: 10px;
+  padding: 8px;
+  background: #0a0a0a;
+  border: 1px solid #1a1a2e;
+  border-radius: 3px;
+  text-align: center;
+}
+.bounding-box-display .dims {
+  font-size: 16px;
+  font-weight: 700;
+  color: #00d4ff;
+  letter-spacing: 2px;
+}
+.bounding-box-display .dims-label {
+  font-size: 8px;
+  color: #555;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+/* Decision & Payment Badges */
+.badges-row {
+  display: flex;
+  gap: 8px;
+}
+.badge {
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  flex: 1;
+  text-align: center;
+}
+.badge-accepted { background: #00ff4118; color: #00ff41; border: 1px solid #00ff4130; }
+.badge-conditional { background: #ffd70018; color: #ffd700; border: 1px solid #ffd70030; }
+.badge-rejected { background: #ff444418; color: #ff4444; border: 1px solid #ff444430; }
+.badge-paid { background: #7c3aed18; color: #a78bfa; border: 1px solid #7c3aed30; }
+.badge-pending { background: #ffd70018; color: #ffd700; border: 1px solid #ffd70030; }
+.badge-failed { background: #ff444418; color: #ff4444; border: 1px solid #ff444430; }
+
+/* Donut Chart */
+.cost-breakdown {
+  background: #0d1117;
+  border: 1px solid #1a1a2e;
+  border-radius: 4px;
+  padding: 12px;
+}
+.cost-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #00d4ff;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.cost-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.donut-container {
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+}
+.cost-legend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.legend-label {
+  flex: 1;
+  color: #888;
+}
+.legend-value {
+  font-weight: 600;
+  color: #c0c0c0;
+}
+
+/* Reasoning Terminal */
+.reasoning-box {
+  background: #0a0a0a;
+  border: 1px solid #1a1a2e;
+  border-radius: 4px;
+  padding: 12px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.reasoning-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #00ff41;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.reasoning-title .blink {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  background: #00ff41;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.reasoning-text {
+  font-size: 11px;
+  color: #888;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ─── Bottom Row ─── */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-bottom: 1px solid #1a1a2e;
+  overflow: hidden;
+}
+
+/* Notifications */
+.notifications-panel {
+  border-right: 1px solid #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid #1a1a2e;
+  background: #0d1117;
+  flex-shrink: 0;
+}
+.notif-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #00d4ff;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.notif-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px;
+}
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  transition: background 0.15s;
+  font-size: 11px;
+  border-bottom: 1px solid #111;
+}
+.notif-item:hover { background: #0d1117; }
+.notif-icon { flex-shrink: 0; font-size: 12px; margin-top: 1px; }
+.notif-text { flex: 1; color: #999; }
+.notif-time { font-size: 9px; color: #444; white-space: nowrap; margin-top: 1px; }
+.notif-item.type-info .notif-text { color: #00d4ff; }
+.notif-item.type-warning .notif-text { color: #ffd700; }
+.notif-item.type-success .notif-text { color: #00ff41; }
+.notif-item.type-error .notif-text { color: #ff4444; }
+
+/* Chat Widget */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid #1a1a2e;
+  background: #0d1117;
+  flex-shrink: 0;
+}
+.chat-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #00ff41;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-msg {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.chat-msg.user { color: #00d4ff; }
+.chat-msg.user::before { content: '$ '; color: #555; }
+.chat-msg.agent { color: #00ff41; padding-left: 14px; opacity: 0.85; }
+.chat-msg.agent::before { content: '→ '; color: #333; }
+.chat-msg.system { color: #444; font-style: italic; font-size: 10px; }
+.chat-input-row {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #1a1a2e;
+  background: #0d1117;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+.chat-prompt-char {
+  color: #00ff41;
+  font-weight: 700;
+  margin-right: 6px;
+  font-size: 12px;
+}
+.chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #e0e0e0;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 8px 0;
+  outline: none;
+}
+.chat-input::placeholder { color: #333; }
+
+/* ─── Status Bar ─── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #0d1117;
+  border-top: 1px solid #1a1a2e;
+  font-size: 10px;
+  color: #555;
+}
+.status-bar .status-group {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.status-dot.green { background: #00ff41; box-shadow: 0 0 6px #00ff4180; }
+.status-dot.yellow { background: #ffd700; box-shadow: 0 0 6px #ffd70080; }
+.status-dot.red { background: #ff4444; box-shadow: 0 0 6px #ff444480; }
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in { animation: fadeIn 0.2s ease-out; }
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px #00d4ff20; }
+  50% { box-shadow: 0 0 12px #00d4ff40; }
+}
+.printing-card { animation: pulse-glow 2s ease-in-out infinite; }
+
+/* Scanline overlay */
+#app::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    #00000008 2px,
+    #00000008 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ─── TOP BAR ─── -->
+  <header class="top-bar">
+    <div class="brand">
+      <div class="brand-name">THE CUSTOM PARTS BUREAU</div>
+      <div class="brand-sub">Financial Brain for Autonomous Manufacturing — Powered by Hermes Agent</div>
+    </div>
+    <div class="metrics" id="metrics"></div>
+  </header>
+
+  <!-- ─── MAIN CONTENT ─── -->
+  <div class="main-content">
+    <!-- Operator Queue -->
+    <div class="panel" id="queue-panel">
+      <div class="panel-header">
+        <span class="panel-title">Operator Queue</span>
+        <span style="font-size:9px;color:#555;" id="queue-count"></span>
+      </div>
+      <div class="panel-body">
+        <div class="kanban" id="kanban"></div>
+      </div>
+    </div>
+
+    <!-- Detail Panel -->
+    <div class="panel" id="detail-panel">
+      <div class="panel-header">
+        <span class="panel-title">Job Detail</span>
+        <span style="font-size:9px;color:#555;" id="detail-job-id"></span>
+      </div>
+      <div class="panel-body" id="detail-body">
+        <div class="detail-empty">
+          <div class="icon">⬡</div>
+          <div class="text">Select a job to inspect</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── BOTTOM ROW ─── -->
+  <div class="bottom-row">
+    <!-- Notifications -->
+    <div class="notifications-panel">
+      <div class="notif-header">
+        <span class="notif-title">Notifications</span>
+        <span style="font-size:9px;color:#555;" id="notif-count"></span>
+      </div>
+      <div class="notif-list" id="notif-list"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-panel">
+      <div class="chat-header">
+        <span class="chat-title">>_ Agent Console</span>
+      </div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <div class="chat-input-row">
+        <span class="chat-prompt-char">$</span>
+        <input type="text" class="chat-input" id="chat-input" placeholder="ask the agent..." autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── STATUS BAR ─── -->
+  <footer class="status-bar">
+    <div class="status-group">
+      <div class="status-item">
+        <span class="status-dot yellow"></span>
+        <span>Printer: Printing</span>
+      </div>
+      <div class="status-item" id="status-current-job">
+        bracket_v2.stl — ETA 32min — 47%
+      </div>
+      <div class="status-item" id="status-queue">
+        Queue: <span id="status-queue-count">3</span> jobs
+      </div>
+    </div>
+    <div class="status-group">
+      <div class="status-item">Uptime: 14h 22m</div>
+      <div class="status-item">
+        <span class="status-dot green"></span>
+        Nemotron 3 Ultra ✓
+      </div>
+      <div class="status-item" style="color:#333;">v0.9.2-beta</div>
+    </div>
+  </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// MOCK DATA
+// ═══════════════════════════════════════════════════════════════
+const jobs = [
+  {
+    id: "Q-20260619-BRACV2",
+    filename: "bracket_v2.stl",
+    status: "printing",
+    decision: "ACCEPTED",
+    confidence: 79.8,
+    total_usd: 12.40,
+    material_usd: 2.48,
+    machine_usd: 4.80,
+    support_usd: 0.30,
+    margin_usd: 4.82,
+    margin_pct: 38.9,
+    volume_cm3: 12.4,
+    triangles: 1240,
+    bounding_box: "45 × 30 × 20",
+    min_wall_mm: 1.2,
+    overhang_pct: 5.2,
+    print_progress: 47,
+    print_eta: "32min",
+    payment_status: "paid",
+    stripe_session: "cs_test_a1b2c3",
+    reasoning: `STRUCTURAL ANALYSIS — bracket_v2.stl
+─────────────────────────────────────
+Volume:        12.4 cm³ (moderate)
+Wall thickness: 1.2mm min — above 0.8mm threshold ✓
+Overhang:      5.2% — well within safe range ✓
+Mesh integrity: Watertight, consistent winding ✓
+
+COST ASSESSMENT
+Material:  $2.48 (PLA @ $0.03/cm³)
+Machine:   $4.80 (est. 1.2hr @ $4/hr)
+Support:   $0.30 (minimal support needed)
+Margin:    38.9% — healthy margin applied
+
+DECISION: ACCEPT
+Confidence: 79.8/100
+Solid bracket design with consistent wall thickness
+throughout. L-shaped geometry is well-suited for
+FDM printing with minimal support requirements.
+No structural concerns identified.`,
+    created_at: "2026-06-19T08:23:00",
+    paid_at: "2026-06-19T08:25:00"
+  },
+  {
+    id: "Q-20260619-MNTPL",
+    filename: "mounting_plate.stl",
+    status: "paid",
+    decision: "ACCEPTED",
+    confidence: 92.1,
+    total_usd: 8.75,
+    material_usd: 1.50,
+    machine_usd: 3.60,
+    support_usd: 0.15,
+    margin_usd: 3.50,
+    margin_pct: 40.0,
+    volume_cm3: 8.2,
+    triangles: 856,
+    bounding_box: "60 × 40 × 6",
+    min_wall_mm: 2.0,
+    overhang_pct: 0.0,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_d4e5f6",
+    reasoning: `STRUCTURAL ANALYSIS — mounting_plate.stl
+──────────────────────────────────────
+Volume:        8.2 cm³ (small-medium)
+Wall thickness: 2.0mm min — excellent ✓
+Overhang:      0.0% — flat plate, no overhangs ✓
+Mesh integrity: Watertight ✓
+
+DECISION: ACCEPT — Confidence 92.1/100
+Simple flat plate with mounting holes. Ideal
+geometry for FDM printing. No support needed.
+Estimated print time: 54 minutes.`,
+    created_at: "2026-06-19T09:12:00",
+    paid_at: "2026-06-19T09:14:00"
+  },
+  {
+    id: "Q-20260619-GEARH",
+    filename: "gear_housing.stl",
+    status: "paid",
+    decision: "ACCEPTED",
+    confidence: 71.4,
+    total_usd: 18.90,
+    material_usd: 4.20,
+    machine_usd: 7.80,
+    support_usd: 1.40,
+    margin_usd: 5.50,
+    margin_pct: 29.1,
+    volume_cm3: 22.8,
+    triangles: 3412,
+    bounding_box: "55 × 55 × 40",
+    min_wall_mm: 1.4,
+    overhang_pct: 18.3,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_g7h8i9",
+    reasoning: `STRUCTURAL ANALYSIS — gear_housing.stl
+─────────────────────────────────────
+Volume:        22.8 cm³ (medium)
+Wall thickness: 1.4mm min — adequate ✓
+Overhang:      18.3% — moderate, supports needed ⚠
+Mesh integrity: Watertight ✓
+
+DECISION: ACCEPT — Confidence 71.4/100
+Cylindrical housing with internal cavity. Some
+support material required for the internal ledge.
+The 18.3% overhang is manageable with tree supports.
+Recommend printing with the open end facing up.`,
+    created_at: "2026-06-19T09:45:00",
+    paid_at: "2026-06-19T09:48:00"
+  },
+  {
+    id: "Q-20260619-ENCDR",
+    filename: "encoder_knob.stl",
+    status: "paid",
+    decision: "ACCEPTED",
+    confidence: 88.5,
+    total_usd: 4.20,
+    material_usd: 0.60,
+    machine_usd: 1.80,
+    support_usd: 0.05,
+    margin_usd: 1.75,
+    margin_pct: 41.7,
+    volume_cm3: 3.1,
+    triangles: 2048,
+    bounding_box: "22 × 22 × 18",
+    min_wall_mm: 1.8,
+    overhang_pct: 2.1,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_j1k2l3",
+    reasoning: `STRUCTURAL ANALYSIS — encoder_knob.stl
+──────────────────────────────────────
+Volume:        3.1 cm³ (small)
+Wall thickness: 1.8mm min — excellent ✓
+Overhang:      2.1% — negligible ✓
+Mesh integrity: Watertight ✓
+
+DECISION: ACCEPT — Confidence 88.5/100
+Knurled cylindrical knob. Compact design with
+good wall thickness. The knurling detail will
+print cleanly in PLA. Quick print, ~25 minutes.`,
+    created_at: "2026-06-19T10:02:00",
+    paid_at: "2026-06-19T10:04:00"
+  },
+  {
+    id: "Q-20260619-HTSNK",
+    filename: "heat_sink_fin.stl",
+    status: "paid",
+    decision: "CONDITIONAL",
+    confidence: 55.2,
+    total_usd: 14.60,
+    material_usd: 2.80,
+    machine_usd: 5.40,
+    support_usd: 1.20,
+    margin_usd: 5.20,
+    margin_pct: 35.6,
+    volume_cm3: 15.6,
+    triangles: 4820,
+    bounding_box: "50 × 35 × 30",
+    min_wall_mm: 0.9,
+    overhang_pct: 28.5,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_m4n5o6",
+    reasoning: `STRUCTURAL ANALYSIS — heat_sink_fin.stl
+──────────────────────────────────────
+Volume:        15.6 cm³ (medium)
+Wall thickness: 0.9mm min — near threshold ⚠
+Overhang:      28.5% — significant support needed ⚠
+Mesh integrity: Watertight ✓
+
+DECISION: CONDITIONAL — Confidence 55.2/100
+Heat sink with thin fin array. The 0.9mm fins are
+close to the 0.8mm minimum threshold. While
+printable, there is risk of fin breakage during
+support removal. Customer warned about fragility.
+Recommend: proceed with caution, use fine supports.`,
+    created_at: "2026-06-19T10:30:00",
+    paid_at: "2026-06-19T10:33:00"
+  },
+  {
+    id: "Q-20260619-PPCNC",
+    filename: "pipe_connector.stl",
+    status: "paid",
+    decision: "ACCEPTED",
+    confidence: 83.7,
+    total_usd: 6.80,
+    material_usd: 1.20,
+    machine_usd: 2.80,
+    support_usd: 0.40,
+    margin_usd: 2.40,
+    margin_pct: 35.3,
+    volume_cm3: 6.5,
+    triangles: 1680,
+    bounding_box: "30 × 30 × 45",
+    min_wall_mm: 1.6,
+    overhang_pct: 8.4,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_p7q8r9",
+    reasoning: `STRUCTURAL ANALYSIS — pipe_connector.stl
+──────────────────────────────────────
+Volume:        6.5 cm³ (small-medium)
+Wall thickness: 1.6mm min — good ✓
+Overhang:      8.4% — minor internal overhangs ✓
+Mesh integrity: Watertight ✓
+
+DECISION: ACCEPT — Confidence 83.7/100
+T-shaped pipe connector. Clean geometry with
+adequate wall thickness. Minor support needed for
+the junction. Print upright for best results.
+Estimated time: ~42 minutes.`,
+    created_at: "2026-06-19T11:15:00",
+    paid_at: "2026-06-19T11:17:00"
+  },
+  {
+    id: "Q-20260619-THNWL",
+    filename: "thin_walls.stl",
+    status: "on_hold",
+    decision: "CONDITIONAL",
+    confidence: 41.0,
+    total_usd: 9.50,
+    material_usd: 1.80,
+    machine_usd: 3.20,
+    support_usd: 0.60,
+    margin_usd: 3.90,
+    margin_pct: 41.1,
+    volume_cm3: 9.8,
+    triangles: 2200,
+    bounding_box: "40 × 35 × 25",
+    min_wall_mm: 0.5,
+    overhang_pct: 15.2,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_s1t2u3",
+    reasoning: `STRUCTURAL ANALYSIS — thin_walls.stl
+─────────────────────────────────────
+Volume:        9.8 cm³ (moderate)
+Wall thickness: 0.5mm min — BELOW threshold ✗
+Overhang:      15.2% — moderate ⚠
+Mesh integrity: Watertight ✓
+
+DECISION: CONDITIONAL — Confidence 41.0/100
+⚠ WARNING: Minimum wall thickness 0.5mm is below
+the 0.8mm safe threshold. Multiple sections at
+risk of print failure. Customer has been notified
+of structural concerns. Awaiting customer response
+on whether to proceed or revise the model.
+
+Recommendation: HOLD — request customer revision.`,
+    created_at: "2026-06-19T07:55:00",
+    paid_at: "2026-06-19T07:58:00"
+  },
+  {
+    id: "Q-20260619-FNLZR",
+    filename: "fan_blade_v3.stl",
+    status: "on_hold",
+    decision: "REJECTED",
+    confidence: 18.4,
+    total_usd: 0.00,
+    material_usd: 3.40,
+    machine_usd: 6.20,
+    support_usd: 2.80,
+    margin_usd: 0.00,
+    margin_pct: 0.0,
+    volume_cm3: 28.5,
+    triangles: 8400,
+    bounding_box: "80 × 80 × 15",
+    min_wall_mm: 0.3,
+    overhang_pct: 62.4,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "refunded",
+    stripe_session: "cs_test_v4w5x6",
+    reasoning: `STRUCTURAL ANALYSIS — fan_blade_v3.stl
+──────────────────────────────────────
+Volume:        28.5 cm³ (large)
+Wall thickness: 0.3mm min — CRITICAL FAILURE ✗✗
+Overhang:      62.4% — extreme overhang ✗
+Mesh integrity: Non-manifold edges detected ✗
+
+DECISION: REJECT — Confidence 18.4/100
+❌ This model cannot be safely printed.
+
+Critical issues:
+1. Wall thickness 0.3mm — far below 0.8mm minimum
+2. 62.4% overhang — would require massive supports
+3. Non-manifold mesh — geometry is not watertight
+4. Thin blade edges would shatter on removal
+
+Payment has been refunded. Customer advised to
+redesign with minimum 1.0mm wall thickness and
+repair mesh topology.`,
+    created_at: "2026-06-19T08:10:00",
+    paid_at: "2026-06-19T08:12:00"
+  },
+  {
+    id: "Q-20260619-SPRKT",
+    filename: "sprocket_28t.stl",
+    status: "on_hold",
+    decision: "REJECTED",
+    confidence: 22.6,
+    total_usd: 0.00,
+    material_usd: 2.10,
+    machine_usd: 4.60,
+    support_usd: 1.90,
+    margin_usd: 0.00,
+    margin_pct: 0.0,
+    volume_cm3: 14.2,
+    triangles: 6720,
+    bounding_box: "65 × 65 × 8",
+    min_wall_mm: 0.4,
+    overhang_pct: 45.8,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "refunded",
+    stripe_session: "cs_test_y7z8a9",
+    reasoning: `STRUCTURAL ANALYSIS — sprocket_28t.stl
+──────────────────────────────────────
+Volume:        14.2 cm³ (medium)
+Wall thickness: 0.4mm min — BELOW threshold ✗
+Overhang:      45.8% — high overhang ✗
+Mesh integrity: Degenerate faces: 14 ✗
+
+DECISION: REJECT — Confidence 22.6/100
+❌ Sprocket teeth are too thin for FDM printing.
+
+The 28-tooth sprocket has tooth tips at 0.4mm
+which will not survive printing. Additionally,
+14 degenerate faces indicate mesh quality issues.
+Payment refunded. Suggest: use SLA/resin printing
+for fine-tooth sprockets, or increase tooth width.`,
+    created_at: "2026-06-19T11:40:00",
+    paid_at: "2026-06-19T11:42:00"
+  },
+  {
+    id: "Q-20260619-BRACV1",
+    filename: "bracket_v1.stl",
+    status: "completed",
+    decision: "ACCEPTED",
+    confidence: 85.2,
+    total_usd: 9.80,
+    material_usd: 1.90,
+    machine_usd: 3.80,
+    support_usd: 0.20,
+    margin_usd: 3.90,
+    margin_pct: 39.8,
+    volume_cm3: 10.1,
+    triangles: 980,
+    bounding_box: "40 × 28 × 18",
+    min_wall_mm: 1.4,
+    overhang_pct: 3.8,
+    print_progress: 100,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_b1c2d3",
+    reasoning: `STRUCTURAL ANALYSIS — bracket_v1.stl
+─────────────────────────────────────
+Volume:        10.1 cm³ (moderate)
+Wall thickness: 1.4mm min ✓
+Overhang:      3.8% ✓ — Mesh: Watertight ✓
+
+DECISION: ACCEPT — Confidence 85.2/100
+Standard L-bracket. Clean print completed in 52
+minutes. No issues encountered.`,
+    created_at: "2026-06-19T06:30:00",
+    paid_at: "2026-06-19T06:32:00"
+  },
+  {
+    id: "Q-20260619-BRACV3",
+    filename: "bracket_v3.stl",
+    status: "completed",
+    decision: "ACCEPTED",
+    confidence: 91.0,
+    total_usd: 11.20,
+    material_usd: 2.10,
+    machine_usd: 4.20,
+    support_usd: 0.10,
+    margin_usd: 4.80,
+    margin_pct: 42.9,
+    volume_cm3: 11.8,
+    triangles: 1120,
+    bounding_box: "48 × 32 × 22",
+    min_wall_mm: 1.6,
+    overhang_pct: 2.1,
+    print_progress: 100,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_e4f5g6",
+    reasoning: `STRUCTURAL ANALYSIS — bracket_v3.stl
+─────────────────────────────────────
+Volume:        11.8 cm³ (moderate)
+Wall thickness: 1.6mm min ✓
+Overhang:      2.1% ✓ — Mesh: Watertight ✓
+
+DECISION: ACCEPT — Confidence 91.0/100
+Improved bracket design with reinforced corners.
+Excellent print quality. Completed in 58 minutes.
+Best margin job today at 42.9%.`,
+    created_at: "2026-06-19T07:15:00",
+    paid_at: "2026-06-19T07:17:00"
+  },
+  {
+    id: "Q-20260619-CBCSE",
+    filename: "cube_case.stl",
+    status: "completed",
+    decision: "ACCEPTED",
+    confidence: 100.0,
+    total_usd: 3.78,
+    material_usd: 0.45,
+    machine_usd: 1.60,
+    support_usd: 0.00,
+    margin_usd: 1.73,
+    margin_pct: 45.8,
+    volume_cm3: 2.1,
+    triangles: 12,
+    bounding_box: "20 × 20 × 20",
+    min_wall_mm: 3.0,
+    overhang_pct: 0.0,
+    print_progress: 100,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_h7i8j9",
+    reasoning: `STRUCTURAL ANALYSIS — cube_case.stl
+─────────────────────────────────────
+Volume:        2.1 cm³ (small)
+Wall thickness: 3.0mm min ✓
+Overhang:      0.0% ✓ — Mesh: Watertight ✓
+
+DECISION: ACCEPT — Confidence 100.0/100
+Simple cube. Perfect geometry for FDM. Printed
+in 18 minutes. Zero issues.`,
+    created_at: "2026-06-19T06:05:00",
+    paid_at: "2026-06-19T06:06:00"
+  },
+  {
+    id: "Q-20260619-CLAMP",
+    filename: "cable_clamp.stl",
+    status: "paid",
+    decision: "ACCEPTED",
+    confidence: 76.3,
+    total_usd: 2.90,
+    material_usd: 0.35,
+    machine_usd: 1.20,
+    support_usd: 0.10,
+    margin_usd: 1.25,
+    margin_pct: 43.1,
+    volume_cm3: 1.8,
+    triangles: 640,
+    bounding_box: "18 × 12 × 10",
+    min_wall_mm: 1.0,
+    overhang_pct: 12.0,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_k1l2m3",
+    reasoning: `STRUCTURAL ANALYSIS — cable_clamp.stl
+──────────────────────────────────────
+Volume:        1.8 cm³ (small)
+Wall thickness: 1.0mm min — adequate ✓
+Overhang:      12.0% — minor clip overhang ✓
+Mesh integrity: Watertight ✓
+
+DECISION: ACCEPT — Confidence 76.3/100
+Small cable management clamp. The spring-clip
+section has some overhang but is within tolerance.
+Quick print — estimated 15 minutes.`,
+    created_at: "2026-06-19T12:05:00",
+    paid_at: "2026-06-19T12:07:00"
+  },
+  {
+    id: "Q-20260619-STNDF",
+    filename: "phone_stand.stl",
+    status: "paid",
+    decision: "CONDITIONAL",
+    confidence: 58.9,
+    total_usd: 7.40,
+    material_usd: 1.60,
+    machine_usd: 2.80,
+    support_usd: 0.80,
+    margin_usd: 2.20,
+    margin_pct: 29.7,
+    volume_cm3: 11.2,
+    triangles: 2960,
+    bounding_box: "70 × 45 × 80",
+    min_wall_mm: 0.85,
+    overhang_pct: 32.1,
+    print_progress: 0,
+    print_eta: "",
+    payment_status: "paid",
+    stripe_session: "cs_test_n4o5p6",
+    reasoning: `STRUCTURAL ANALYSIS — phone_stand.stl
+──────────────────────────────────────
+Volume:        11.2 cm³ (medium)
+Wall thickness: 0.85mm min — borderline ⚠
+Overhang:      32.1% — significant support ⚠
+Mesh integrity: Watertight ✓
+
+DECISION: CONDITIONAL — Confidence 58.9/100
+Phone stand with curved back support. The thin
+lip section at 0.85mm is just above threshold.
+Heavy support usage due to 32.1% overhang on the
+curved section. Printable but with risk. Customer
+notified of potential surface quality issues where
+supports contact the model.`,
+    created_at: "2026-06-19T12:30:00",
+    paid_at: "2026-06-19T12:33:00"
+  }
+];
+
+// ─── Notifications ───
+const notifications = [
+  { type: "success", icon: "✅", text: "cube_case.stl printed & shipped — tracking: TB-2026-0001", time: "06:42" },
+  { type: "success", icon: "✅", text: "bracket_v1.stl printed & shipped — tracking: TB-2026-0002", time: "07:38" },
+  { type: "success", icon: "✅", text: "bracket_v3.stl marked complete — best margin today 42.9%", time: "08:18" },
+  { type: "info", icon: "🔔", text: "New job paid: bracket_v2.stl — $12.40 — printing now", time: "08:25" },
+  { type: "error", icon: "🔴", text: "REJECTED: fan_blade_v3.stl — wall thickness 0.3mm, refund issued", time: "08:14" },
+  { type: "warning", icon: "⚠️", text: "Customer warned: thin_walls.stl may be fragile (0.5mm walls)", time: "07:59" },
+  { type: "info", icon: "🔔", text: "New job paid: mounting_plate.stl — $8.75 — queued", time: "09:14" },
+  { type: "info", icon: "🔔", text: "New job paid: gear_housing.stl — $18.90 — queued", time: "09:48" },
+  { type: "info", icon: "🔔", text: "New job paid: encoder_knob.stl — $4.20 — queued", time: "10:04" },
+  { type: "warning", icon: "⚠️", text: "heat_sink_fin.stl — thin fins at 0.9mm, printing with caution", time: "10:33" },
+  { type: "error", icon: "🔴", text: "REJECTED: sprocket_28t.stl — tooth tips 0.4mm, refund issued", time: "11:43" },
+  { type: "info", icon: "🔔", text: "New job paid: pipe_connector.stl — $6.80 — queued", time: "11:17" },
+  { type: "info", icon: "📦", text: "bracket_v1.stl shipped — tracking: TB-2026-0002", time: "11:50" },
+  { type: "info", icon: "🔔", text: "New job paid: cable_clamp.stl — $2.90 — queued", time: "12:07" },
+  { type: "warning", icon: "⚠️", text: "phone_stand.stl — 32.1% overhang, heavy supports needed", time: "12:34" },
+];
+
+// ─── Chat responses ───
+const chatResponses = {
+  "what's next to print": "mounting_plate.stl — paid $8.75, confidence 92.1%, ETA 54min. Simple flat plate, no supports needed. Best next job in queue.",
+  "next": "mounting_plate.stl — paid $8.75, confidence 92.1%, ETA 54min. Simple flat plate, no supports needed.",
+  "margin today": "34.2% average across 8 accepted jobs.\n→ Best: cube_case.stl at 45.8%\n→ Worst: gear_housing.stl at 29.1%\n→ 2 rejected jobs (refunded, no margin impact)",
+  "margin": "34.2% average across 8 accepted jobs. Best: cube_case at 45.8%. Worst: gear_housing at 29.1%.",
+  "how much filament used": "18.4g PLA today across 3 completed prints. $0.55 total material cost. Current job (bracket_v2) will add 3.1g.",
+  "filament": "18.4g PLA today. $0.55 material cost. bracket_v2 printing will add 3.1g.",
+  "revenue": "$43.18 revenue today from 11 accepted jobs. 3 completed ($24.78), 1 printing ($12.40), 7 in queue. 2 rejected (refunded).",
+  "status": "🟡 Printing: bracket_v2.stl — 47% complete, ETA 32min\n📋 Queue: 7 jobs waiting ($63.55 total)\n✅ Completed: 3 jobs ($24.78)\n❌ Rejected: 2 jobs (refunded)\n⏸ On Hold: 1 job (thin_walls.stl — awaiting customer)",
+  "rejected": "2 jobs rejected today:\n1. fan_blade_v3.stl — 0.3mm walls, 62% overhang, non-manifold mesh\n2. sprocket_28t.stl — 0.4mm tooth tips, degenerate faces\nBoth refunded automatically.",
+  "queue": "7 jobs in queue:\n1. mounting_plate.stl — $8.75 (92.1%)\n2. gear_housing.stl — $18.90 (71.4%)\n3. encoder_knob.stl — $4.20 (88.5%)\n4. heat_sink_fin.stl — $14.60 (55.2%) ⚠\n5. pipe_connector.stl — $6.80 (83.7%)\n6. cable_clamp.stl — $2.90 (76.3%)\n7. phone_stand.stl — $7.40 (58.9%) ⚠",
+  "help": "Available queries:\n→ what's next to print\n→ margin today / revenue\n→ how much filament used\n→ status / queue / rejected\n→ or ask about any specific job by filename",
+  "thin_walls": "thin_walls.stl — ON HOLD\nConfidence: 41.0/100 (CONDITIONAL)\nIssue: 0.5mm walls below 0.8mm threshold\nStatus: Awaiting customer response on revision\nPaid: $9.50 (held, not refunded yet)",
+  "hello": "Custom Parts Bureau agent online. Nemotron 3 Ultra reasoning active. How can I help?",
+  "hi": "Custom Parts Bureau agent online. Nemotron 3 Ultra reasoning active. Ask me about jobs, margins, or the queue.",
+};
+
+// ═══════════════════════════════════════════════════════════════
+// RENDER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+let selectedJobId = null;
+
+function getTimeAgo(dateStr) {
+  const now = new Date("2026-06-19T12:46:00");
+  const then = new Date(dateStr);
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  return `${diffHr}h ${diffMin % 60}m ago`;
+}
+
+function getConfidenceClass(c) {
+  if (c >= 70) return 'confidence-high';
+  if (c >= 30) return 'confidence-mid';
+  return 'confidence-low';
+}
+
+// ─── Metrics ───
+function renderMetrics() {
+  const completedJobs = jobs.filter(j => ['completed','printing','paid'].includes(j.status) && j.decision !== 'REJECTED');
+  const revenue = completedJobs.reduce((s, j) => s + j.total_usd, 0);
+  const margins = completedJobs.filter(j => j.margin_pct > 0).map(j => j.margin_pct);
+  const avgMargin = margins.length ? margins.reduce((a, b) => a + b, 0) / margins.length : 0;
+  const shipped = jobs.filter(j => j.status === 'completed').length;
+
+  const sparkData = [18, 32, 28, 41, 35, 43, revenue];
+  const maxSpark = Math.max(...sparkData);
+
+  document.getElementById('metrics').innerHTML = `
+    <div class="metric">
+      <span class="metric-label">Balance</span>
+      <span class="metric-value green">$127.43</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Revenue Today</span>
+      <span class="metric-value cyan">$${revenue.toFixed(2)}</span>
+      <div class="metric-spark">
+        ${sparkData.map(v => `<div class="bar" style="height:${Math.max(2, (v / maxSpark) * 16)}px"></div>`).join('')}
+      </div>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Avg Margin</span>
+      <span class="metric-value ${avgMargin >= 30 ? 'green' : avgMargin >= 15 ? 'yellow' : ''}">${avgMargin.toFixed(1)}%</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Parts Shipped</span>
+      <span class="metric-value cyan">${shipped}</span>
+    </div>
+  `;
+}
+
+// ─── Kanban ───
+function renderKanban() {
+  const columns = {
+    paid: jobs.filter(j => j.status === 'paid'),
+    printing: jobs.filter(j => j.status === 'printing'),
+    completed: jobs.filter(j => j.status === 'completed'),
+    on_hold: jobs.filter(j => j.status === 'on_hold'),
+  };
+
+  document.getElementById('queue-count').textContent = `${jobs.length} jobs total`;
+  document.getElementById('status-queue-count').textContent = columns.paid.length;
+
+  const kanban = document.getElementById('kanban');
+  kanban.innerHTML = `
+    <div class="kanban-col col-paid">
+      <div class="kanban-col-header">Paid — Ready <span class="count">${columns.paid.length}</span></div>
+      <div class="kanban-cards">${columns.paid.map(j => renderCard(j)).join('')}</div>
+    </div>
+    <div class="kanban-col col-printing">
+      <div class="kanban-col-header">Printing <span class="count">${columns.printing.length}</span></div>
+      <div class="kanban-cards">${columns.printing.map(j => renderCard(j, true)).join('')}</div>
+    </div>
+    <div class="kanban-col col-completed">
+      <div class="kanban-col-header">Completed <span class="count">${columns.completed.length}</span></div>
+      <div class="kanban-cards">${columns.completed.map(j => renderCard(j)).join('')}</div>
+    </div>
+    <div class="kanban-col col-hold">
+      <div class="kanban-col-header">On Hold <span class="count">${columns.on_hold.length}</span></div>
+      <div class="kanban-cards">${columns.on_hold.map(j => renderCard(j)).join('')}</div>
+    </div>
+  `;
+}
+
+function renderCard(job, isPrinting = false) {
+  const selected = job.id === selectedJobId ? 'selected' : '';
+  const printingClass = isPrinting ? 'printing-card' : '';
+  const progress = isPrinting ? `
+    <div class="progress-bar-outer">
+      <div class="progress-bar-inner" style="width:${job.print_progress}%"></div>
+    </div>
+    <div style="font-size:9px;color:#00d4ff;margin-top:3px;">${job.print_progress}% — ETA ${job.print_eta}</div>
+  ` : '';
+  const rejectedTag = job.decision === 'REJECTED' ? '<span style="color:#ff4444;font-size:9px;"> ✗ REFUNDED</span>' : '';
+
+  return `
+    <div class="job-card ${selected} ${printingClass}" data-id="${job.id}" onclick="selectJob('${job.id}')">
+      <div class="filename">${job.filename}${rejectedTag}</div>
+      <div class="meta">
+        <span class="amount">${job.total_usd > 0 ? '$' + job.total_usd.toFixed(2) : '—'}</span>
+        <span class="confidence-badge ${getConfidenceClass(job.confidence)}">${job.confidence.toFixed(1)}</span>
+      </div>
+      <div class="time-ago">${getTimeAgo(job.paid_at || job.created_at)}</div>
+      ${progress}
+    </div>
+  `;
+}
+
+// ─── Detail Panel ───
+function selectJob(jobId) {
+  selectedJobId = jobId;
+  const job = jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  renderKanban(); // re-render to update selection
+
+  document.getElementById('detail-job-id').textContent = job.id;
+
+  // Decision badge
+  const decisionClass = job.decision === 'ACCEPTED' ? 'badge-accepted' :
+                         job.decision === 'CONDITIONAL' ? 'badge-conditional' : 'badge-rejected';
+  const decisionLabel = job.decision === 'ACCEPTED' ? '✓ ACCEPTED' :
+                         job.decision === 'CONDITIONAL' ? '⚠ CONDITIONAL' : '✗ REJECTED';
+
+  // Payment badge
+  const payClass = job.payment_status === 'paid' ? 'badge-paid' :
+                   job.payment_status === 'refunded' ? 'badge-failed' : 'badge-pending';
+  const payIcon = job.payment_status === 'paid' ? '✓' : job.payment_status === 'refunded' ? '↩' : '…';
+
+  // Donut chart SVG
+  const donutSVG = renderDonut(job);
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-content animate-in">
+      <!-- Badges -->
+      <div class="badges-row">
+        <div class="badge ${decisionClass}">${decisionLabel}</div>
+        <div class="badge ${payClass}">STRIPE ${payIcon} ${job.payment_status.toUpperCase()}</div>
+      </div>
+
+      <!-- Geometry -->
+      <div class="geometry-info">
+        <div class="geo-header">
+          <span class="geo-title">Geometry Analysis</span>
+          <span style="font-size:9px;color:#555;">${job.filename}</span>
+        </div>
+        <div class="geo-grid">
+          <div class="geo-stat">
+            <div class="label">Volume</div>
+            <div class="value">${job.volume_cm3} cm³</div>
+          </div>
+          <div class="geo-stat">
+            <div class="label">Triangles</div>
+            <div class="value">${job.triangles.toLocaleString()}</div>
+          </div>
+          <div class="geo-stat">
+            <div class="label">Min Wall</div>
+            <div class="value" style="color:${job.min_wall_mm < 0.8 ? '#ff4444' : '#00ff41'}">${job.min_wall_mm}mm</div>
+          </div>
+          <div class="geo-stat">
+            <div class="label">Overhang</div>
+            <div class="value" style="color:${job.overhang_pct > 30 ? '#ff4444' : job.overhang_pct > 15 ? '#ffd700' : '#00ff41'}">${job.overhang_pct}%</div>
+          </div>
+          <div class="geo-stat">
+            <div class="label">Confidence</div>
+            <div class="value" style="color:${job.confidence >= 70 ? '#00ff41' : job.confidence >= 30 ? '#ffd700' : '#ff4444'}">${job.confidence.toFixed(1)}</div>
+          </div>
+          <div class="geo-stat">
+            <div class="label">Total</div>
+            <div class="value" style="color:#00ff41">$${job.total_usd.toFixed(2)}</div>
+          </div>
+        </div>
+        <div class="bounding-box-display">
+          <div class="dims">${job.bounding_box} mm</div>
+          <div class="dims-label">BOUNDING BOX</div>
+        </div>
+      </div>
+
+      <!-- Cost Breakdown -->
+      <div class="cost-breakdown">
+        <div class="cost-title">Cost Breakdown</div>
+        <div class="cost-chart-row">
+          <div class="donut-container">${donutSVG}</div>
+          <div class="cost-legend">
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#00d4ff"></span>
+              <span class="legend-label">Material</span>
+              <span class="legend-value">$${job.material_usd.toFixed(2)}</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#7c3aed"></span>
+              <span class="legend-label">Machine</span>
+              <span class="legend-value">$${job.machine_usd.toFixed(2)}</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#ffd700"></span>
+              <span class="legend-label">Support</span>
+              <span class="legend-value">$${job.support_usd.toFixed(2)}</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-dot" style="background:#00ff41"></span>
+              <span class="legend-label">Margin</span>
+              <span class="legend-value">$${job.margin_usd.toFixed(2)} <span style="color:#555">(${job.margin_pct.toFixed(1)}%)</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reasoning -->
+      <div class="reasoning-box">
+        <div class="reasoning-title">
+          <span>Nemotron 3 Ultra Reasoning</span>
+          <span class="blink"></span>
+        </div>
+        <div class="reasoning-text">${job.reasoning}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDonut(job) {
+  const total = job.material_usd + job.machine_usd + job.support_usd + job.margin_usd;
+  if (total === 0) {
+    return `<svg viewBox="0 0 100 100" width="100" height="100">
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#1a1a2e" stroke-width="15"/>
+      <text x="50" y="54" text-anchor="middle" fill="#555" font-size="10" font-family="JetBrains Mono">N/A</text>
+    </svg>`;
+  }
+
+  const segments = [
+    { value: job.material_usd, color: '#00d4ff' },
+    { value: job.machine_usd, color: '#7c3aed' },
+    { value: job.support_usd, color: '#ffd700' },
+    { value: job.margin_usd, color: '#00ff41' },
+  ];
+
+  const circumference = 2 * Math.PI * 40;
+  let offset = 0;
+  let arcs = '';
+
+  for (const seg of segments) {
+    const pct = seg.value / total;
+    const len = pct * circumference;
+    arcs += `<circle cx="50" cy="50" r="40" fill="none"
+      stroke="${seg.color}" stroke-width="15"
+      stroke-dasharray="${len} ${circumference - len}"
+      stroke-dashoffset="${-offset}"
+      transform="rotate(-90 50 50)"
+      style="opacity:0.85"/>`;
+    offset += len;
+  }
+
+  return `<svg viewBox="0 0 100 100" width="100" height="100">
+    ${arcs}
+    <circle cx="50" cy="50" r="30" fill="#0d1117"/>
+    <text x="50" y="48" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="700" font-family="JetBrains Mono">$${total.toFixed(2)}</text>
+    <text x="50" y="60" text-anchor="middle" fill="#555" font-size="7" font-family="JetBrains Mono">TOTAL</text>
+  </svg>`;
+}
+
+// ─── Notifications ───
+function renderNotifications() {
+  const list = document.getElementById('notif-list');
+  document.getElementById('notif-count').textContent = `${notifications.length} events`;
+  // Render most recent first
+  list.innerHTML = [...notifications].reverse().map(n => `
+    <div class="notif-item type-${n.type}">
+      <span class="notif-icon">${n.icon}</span>
+      <span class="notif-text">${n.text}</span>
+      <span class="notif-time">${n.time}</span>
+    </div>
+  `).join('');
+}
+
+// ─── Chat ───
+function initChat() {
+  const messages = document.getElementById('chat-messages');
+  const input = document.getElementById('chat-input');
+
+  // Initial messages
+  addChatMessage('system', 'Hermes Agent console initialized. Nemotron 3 Ultra online.');
+  addChatMessage('system', 'Type "help" for available queries.');
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      const query = input.value.trim().toLowerCase();
+      addChatMessage('user', input.value.trim());
+      input.value = '';
+
+      // Find best matching response
+      setTimeout(() => {
+        let response = null;
+        for (const [key, val] of Object.entries(chatResponses)) {
+          if (query.includes(key)) {
+            response = val;
+            break;
+          }
+        }
+
+        // Check if asking about a specific job
+        if (!response) {
+          const matchedJob = jobs.find(j => query.includes(j.filename.replace('.stl', '').toLowerCase()));
+          if (matchedJob) {
+            response = `${matchedJob.filename} — ${matchedJob.decision}\nConfidence: ${matchedJob.confidence}/100 | Total: $${matchedJob.total_usd.toFixed(2)}\nStatus: ${matchedJob.status} | Margin: ${matchedJob.margin_pct}%\nBounding box: ${matchedJob.bounding_box} mm | Wall: ${matchedJob.min_wall_mm}mm`;
+          }
+        }
+
+        if (!response) {
+          response = 'Query not recognized. Type "help" to see available commands.';
+        }
+
+        addChatMessage('agent', response);
+      }, 300 + Math.random() * 400);
+    }
+  });
+}
+
+function addChatMessage(type, text) {
+  const messages = document.getElementById('chat-messages');
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${type}`;
+    div.textContent = line;
+    messages.appendChild(div);
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// ─── Simulated Progress ───
+function simulateProgress() {
+  const printingJob = jobs.find(j => j.status === 'printing');
+  if (printingJob && printingJob.print_progress < 100) {
+    printingJob.print_progress = Math.min(100, printingJob.print_progress + 1);
+    if (printingJob.print_progress >= 100) {
+      printingJob.status = 'completed';
+      printingJob.print_eta = '';
+      notifications.push({
+        type: 'success',
+        icon: '✅',
+        text: `${printingJob.filename} print complete! Ready for shipping.`,
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+      });
+      renderNotifications();
+    } else {
+      const minLeft = Math.round((100 - printingJob.print_progress) * 0.68);
+      printingJob.print_eta = `${minLeft}min`;
+      document.getElementById('status-current-job').textContent =
+        `${printingJob.filename} — ETA ${printingJob.print_eta} — ${printingJob.print_progress}%`;
+    }
+
+    // Update kanban cards if visible
+    renderKanban();
+    if (selectedJobId === printingJob.id) {
+      selectJob(printingJob.id);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+
+function init() {
+  renderMetrics();
+  renderKanban();
+  renderNotifications();
+  initChat();
+
+  // Auto-select the printing job
+  selectJob('Q-20260619-BRACV2');
+
+  // Simulate printing progress every 8 seconds
+  setInterval(simulateProgress, 8000);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
