@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}The Custom Parts Bureau{% endblock %}</title>
+    <meta name="description" content="AI-Powered Instant Quoting and P&L Tracking for 3D Printing Operations.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface-light: #161b22;
+            --border: #1a1a2e;
+            --border-glow: #00d4ff30;
+            --text: #c0c0c0;
+            --text-bright: #e0e0e0;
+            --text-dim: #555555;
+            
+            --accent-green: #00ff41;
+            --accent-blue: #00d4ff;
+            --accent-orange: #ffd700;
+            --accent-red: #ff4444;
+            
+            --shadow-green: 0 0 15px rgba(0, 255, 65, 0.2);
+            --shadow-blue: 0 0 15px rgba(0, 212, 255, 0.2);
+            --shadow-orange: 0 0 15px rgba(255, 215, 0, 0.2);
+            --shadow-red: 0 0 15px rgba(255, 68, 68, 0.2);
+        }
+
+        /* ─── Reset & Base ─── */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1a1a2e;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.25);
+        }
+
+        /* CRT Screen Overlay & Scanlines */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.15) 2px,
+                rgba(0, 0, 0, 0.15) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* ─── Outer Page Structure ─── */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        /* Header Style matching Dashboard */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(180deg, #0d1117 0%, var(--bg) 100%);
+            height: 72px;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 10;
+        }
+
+        .brand {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            text-decoration: none;
+        }
+
+        .brand-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent-green);
+            letter-spacing: 3px;
+            text-shadow: 0 0 20px rgba(0, 255, 65, 0.25);
+        }
+
+        .brand-sub {
+            font-size: 9px;
+            color: var(--text-dim);
+            letter-spacing: 1.5px;
+            margin-top: -2px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-link {
+            color: var(--text);
+            text-decoration: none;
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 6px 12px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            color: var(--accent-blue);
+            border-color: rgba(0, 212, 255, 0.3);
+            background: rgba(0, 212, 255, 0.05);
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        /* Main Content Panel */
+        .main-panel {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px 20px;
+            position: relative;
+        }
+
+        /* Footer Style */
+        .bottom-bar {
+            height: 36px;
+            border-top: 1px solid var(--border);
+            background: #080808;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+            font-size: 10px;
+            color: var(--text-dim);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; box-shadow: 0 0 12px var(--accent-green); }
+            100% { opacity: 0.6; }
+        }
+
+        /* Common Monospace Card / Container classes */
+        .terminal-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 24px;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .terminal-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            border-radius: 4px 4px 0 0;
+        }
+
+        .btn {
+            background: transparent;
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: rgba(0, 255, 65, 0.1);
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
+            text-shadow: 0 0 8px rgba(0, 255, 65, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            border-color: var(--text-dim);
+            color: var(--text-dim);
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .btn-cyan {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .btn-cyan:hover:not(:disabled) {
+            background: rgba(0, 212, 255, 0.1);
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+            text-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+        }
+
+        /* ─── Global Utility Animations ─── */
+        @keyframes blink-cursor {
+            50% { opacity: 0; }
+        }
+        
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 14px;
+            background: currentColor;
+            vertical-align: middle;
+            margin-left: 2px;
+            animation: blink-cursor 1s step-end infinite;
+        }
+    </style>
+    {% block styles %}{% endblock %}
+</head>
+<body>
+    <div class="app-container">
+        <!-- ─── TOP BAR ─── -->
+        <header class="top-bar">
+            <a href="/" class="brand">
+                <div class="brand-name">THE CUSTOM PARTS BUREAU</div>
+                <div class="brand-sub">AI-Powered Autonomous Parts Quoting & Manufacturing</div>
+            </a>
+            <nav class="nav-links">
+                <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">New Quote</a>
+                <a href="/dashboard" class="nav-link">Operator Dashboard</a>
+            </nav>
+        </header>
+
+        <!-- ─── MAIN CONTENT PANEL ─── -->
+        <main class="main-panel">
+            {% block content %}{% endblock %}
+        </main>
+
+        <!-- ─── BOTTOM BAR ─── -->
+        <footer class="bottom-bar">
+            <div>
+                System Status: <span class="status-indicator" style="display: inline-flex;"><span class="status-dot"></span> ONLINE</span>
+            </div>
+            <div>
+                Nemotron 3 Ultra (550B) reasoning active
+            </div>
+            <div>
+                Stripe Sandbox Mode
+            </div>
+        </footer>
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

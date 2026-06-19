@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+
+{% block title %}The Custom Parts Bureau — Order Status{% endblock %}
+
+{% block styles %}
+<style>
+    .status-container {
+        width: 100%;
+        max-width: 720px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+        animation: fadeIn 0.4s ease-out;
+    }
+
+    .status-header {
+        text-align: center;
+    }
+
+    .status-title {
+        font-size: 11px;
+        color: var(--accent-blue);
+        letter-spacing: 2.5px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+    }
+
+    .status-job-id {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-bright);
+        letter-spacing: 1px;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.05);
+    }
+
+    /* Timeline Styling */
+    .timeline-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 30px 20px;
+        position: relative;
+    }
+
+    .timeline-track-container {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        padding: 0 20px;
+        margin-bottom: 24px;
+    }
+
+    .timeline-line {
+        position: absolute;
+        top: 50%;
+        left: 20px;
+        right: 20px;
+        height: 2px;
+        background: #1a1a2e;
+        transform: translateY(-50%);
+        z-index: 1;
+    }
+
+    .timeline-line-progress {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%; /* Dynamic update */
+        background: var(--accent-green);
+        box-shadow: 0 0 8px var(--accent-green);
+        transition: width 0.5s ease;
+    }
+
+    .timeline-node {
+        position: relative;
+        z-index: 2;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #1a1a2e;
+        border: 2px solid #222;
+        transition: all 0.3s ease;
+    }
+
+    .timeline-node.completed {
+        background: var(--accent-green);
+        border-color: var(--bg);
+        box-shadow: 0 0 10px var(--accent-green);
+    }
+
+    .timeline-node.current {
+        background: var(--accent-blue);
+        border-color: var(--bg);
+        width: 16px;
+        height: 16px;
+        box-shadow: 0 0 12px var(--accent-blue);
+        animation: pulseCurrent 1.5s infinite;
+    }
+
+    .timeline-node.rejected {
+        background: var(--accent-red);
+        border-color: var(--bg);
+        box-shadow: 0 0 12px var(--accent-red);
+    }
+
+    .timeline-labels {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
+        padding: 0;
+    }
+
+    .timeline-label-item {
+        width: 80px;
+        text-align: center;
+        font-size: 9px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        transition: color 0.3s ease;
+    }
+
+    .timeline-label-item.active {
+        color: var(--text-bright);
+    }
+
+    .timeline-label-item.completed {
+        color: var(--accent-green);
+    }
+
+    .timeline-label-item.current {
+        color: var(--accent-blue);
+        font-weight: 600;
+        text-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+    }
+
+    .timeline-label-item.rejected {
+        color: var(--accent-red);
+        font-weight: 600;
+    }
+
+    @keyframes pulseCurrent {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 8px var(--accent-blue); }
+        50% { transform: scale(1.25); box-shadow: 0 0 16px var(--accent-blue); }
+    }
+
+    /* Details Panel */
+    .details-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .details-title-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+    }
+
+    .details-filename {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-bright);
+    }
+
+    .details-badge {
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        border: 1px solid transparent;
+    }
+
+    .details-badge.badge-uploaded    { background: rgba(0, 212, 255, 0.1); color: var(--accent-blue); border-color: rgba(0, 212, 255, 0.2); }
+    .details-badge.badge-analyzing   { background: rgba(0, 212, 255, 0.1); color: var(--accent-blue); border-color: rgba(0, 212, 255, 0.2); }
+    .details-badge.badge-quoted      { background: rgba(255, 215, 0, 0.1); color: var(--accent-orange); border-color: rgba(255, 215, 0, 0.2); }
+    .details-badge.badge-paid        { background: rgba(0, 255, 65, 0.1); color: var(--accent-green); border-color: rgba(0, 255, 65, 0.2); }
+    .details-badge.badge-printing    { background: rgba(0, 212, 255, 0.1); color: var(--accent-blue); border-color: rgba(0, 212, 255, 0.2); }
+    .details-badge.badge-completed   { background: rgba(0, 255, 65, 0.1); color: var(--accent-green); border-color: rgba(0, 255, 65, 0.2); }
+    .details-badge.badge-rejected    { background: rgba(255, 68, 68, 0.1); color: var(--accent-red); border-color: rgba(255, 68, 68, 0.2); }
+
+    .details-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px 24px;
+        font-size: 12px;
+    }
+
+    .details-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .details-label {
+        font-size: 9px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .details-value {
+        color: var(--text-bright);
+        font-weight: 500;
+    }
+
+    /* Actions area */
+    .status-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        margin-top: 8px;
+    }
+
+    .status-message-alert {
+        background: rgba(0, 255, 65, 0.03);
+        border: 1px solid rgba(0, 255, 65, 0.15);
+        color: var(--accent-green);
+        border-radius: 4px;
+        padding: 14px;
+        width: 100%;
+        text-align: center;
+        font-size: 11px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+    }
+
+    .status-message-alert.alert-blue {
+        background: rgba(0, 212, 255, 0.03);
+        border: 1px solid rgba(0, 212, 255, 0.15);
+        color: var(--accent-blue);
+    }
+
+    .status-message-alert.alert-red {
+        background: rgba(255, 68, 68, 0.03);
+        border: 1px solid rgba(255, 68, 68, 0.15);
+        color: var(--accent-red);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="status-container">
+    <div class="status-header">
+        <p class="status-title">Order Status Manifest</p>
+        <h2 class="status-job-id" id="job-id-title">{{ job_id }}</h2>
+    </div>
+
+    <!-- Order Timeline Card -->
+    <div class="timeline-card">
+        <div class="timeline-track-container">
+            <div class="timeline-line">
+                <div class="timeline-line-progress" id="timeline-progress-bar"></div>
+            </div>
+            <div class="timeline-node" id="node-uploaded"></div>
+            <div class="timeline-node" id="node-analyzed"></div>
+            <div class="timeline-node" id="node-quoted"></div>
+            <div class="timeline-node" id="node-paid"></div>
+            <div class="timeline-node" id="node-printing"></div>
+            <div class="timeline-node" id="node-completed"></div>
+        </div>
+
+        <div class="timeline-labels">
+            <div class="timeline-label-item" id="label-uploaded">Uploaded</div>
+            <div class="timeline-label-item" id="label-analyzed">Analyzed</div>
+            <div class="timeline-label-item" id="label-quoted">Quoted</div>
+            <div class="timeline-label-item" id="label-paid">Paid</div>
+            <div class="timeline-label-item" id="label-printing">Printing</div>
+            <div class="timeline-label-item" id="label-completed">Completed</div>
+        </div>
+    </div>
+
+    <!-- Details card panel -->
+    <div class="details-box">
+        <div class="details-title-bar">
+            <div class="details-filename" id="det-filename">part_model.stl</div>
+            <div class="details-badge" id="det-status-badge">uploaded</div>
+        </div>
+        
+        <div class="details-grid">
+            <div class="details-item">
+                <span class="details-label">Client Email</span>
+                <span class="details-value" id="det-email">--</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Total Cost</span>
+                <span class="details-value" style="color: var(--accent-green); font-weight: 700;" id="det-cost">--</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Volume & Triangles</span>
+                <span class="details-value" id="det-geom">-- cm³ / -- triangles</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Bounding Dimensions</span>
+                <span class="details-value" id="det-bbox">--</span>
+            </div>
+            <div class="details-item" style="grid-column: span 2;">
+                <span class="details-label">Pipeline Analysis Snapshot</span>
+                <span class="details-value" style="font-size: 11px; line-height: 1.5; color: var(--text-dim); font-style: italic;" id="det-reasoning">--</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Area -->
+    <div class="status-actions">
+        <!-- Status Messages -->
+        <div class="status-message-alert alert-blue" id="alert-uploading" style="display: none;">
+            ⚙ Analysis pipeline executing. Processing mesh dimensions...
+        </div>
+        <div class="status-message-alert alert-blue" id="alert-analyzing" style="display: none;">
+            ⚙ Running FDM physics checks & raycast wall thickness scans...
+        </div>
+        <div class="status-message-alert" id="alert-completed" style="display: none;">
+            📦 Print complete! Job is packaged and routed for shipment dispatch.
+        </div>
+        <div class="status-message-alert alert-red" id="alert-rejected" style="display: none;">
+            ❌ Order Rejected. Model violates design limits. See quote screen for details.
+        </div>
+        <div class="status-message-alert alert-blue" id="alert-printing" style="display: none;">
+            ⚡ Job is loaded on Printer Unit 01. Temperature: 215°C. Extruding PLA filament...
+        </div>
+        <div class="status-message-alert" id="alert-paid" style="display: none;">
+            💰 Payment verified. Job placed in queue. Awaiting mechanical print allocation...
+        </div>
+
+        <a href="/quote/{{ job_id }}" class="btn btn-cyan" id="pay-now-btn" style="width: 100%; display: none;">
+            💳 Complete Payment & Start Print
+        </a>
+
+        <a href="/" class="btn" style="width: 100%;">
+            ← Upload Another Part File
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const jobId = "{{ job_id }}";
+    let pollInterval = null;
+
+    // Map database status string to timeline index
+    const statusIndices = {
+        'uploaded': 0,
+        'analyzing': 1,
+        'quoted': 2,
+        'paying': 2, // Quoted but trying to pay
+        'paid': 3,
+        'printing': 4,
+        'completed': 5,
+        'rejected': 1 // Rejected terminates at Analyzed
+    };
+
+    function pollStatus() {
+        fetch(`/api/status/${jobId}`)
+        .then(res => {
+            if (!res.ok) throw new Error("Status API request failed");
+            return res.json();
+        })
+        .then(data => {
+            updateUI(data);
+            
+            // If the job has reached a terminal state (completed or rejected), stop polling
+            if (data.status === 'completed' || data.status === 'rejected') {
+                clearInterval(pollInterval);
+            }
+        })
+        .catch(err => {
+            console.error("Polling error:", err);
+        });
+    }
+
+    function updateUI(data) {
+        // Set basic details
+        document.getElementById('det-filename').textContent = data.filename;
+        document.getElementById('det-email').textContent = data.email;
+        document.getElementById('det-cost').textContent = data.total_usd ? `$${data.total_usd.toFixed(2)}` : 'No quote generated';
+        document.getElementById('det-bbox').textContent = data.bounding_box || '--';
+        
+        const volumeStr = data.volume_cm3 ? `${data.volume_cm3.toFixed(2)} cm³` : '-- cm³';
+        const triStr = data.triangle_count ? `${data.triangle_count.toLocaleString()} triangles` : '-- triangles';
+        document.getElementById('det-geom').textContent = `${volumeStr} / ${triStr}`;
+        
+        // Snippet of reasoning text (prefer Nemotron, fallback to built-in if missing or API error)
+        let snippet = data.nemotron_explanation;
+        if (!snippet || snippet.includes('[Nemotron API error:')) {
+            snippet = data.reasoning_text || "Awaiting pipeline computation results...";
+        }
+        // Take first 180 chars or so
+        if (snippet.length > 180) {
+            snippet = snippet.substring(0, 180) + '...';
+        }
+        document.getElementById('det-reasoning').textContent = snippet;
+
+        // Update status badge
+        const badge = document.getElementById('det-status-badge');
+        badge.textContent = data.status;
+        badge.className = `details-badge badge-${data.status}`;
+
+        // Hide all status message alerts
+        document.getElementById('alert-uploading').style.display = 'none';
+        document.getElementById('alert-analyzing').style.display = 'none';
+        document.getElementById('alert-completed').style.display = 'none';
+        document.getElementById('alert-rejected').style.display = 'none';
+        document.getElementById('alert-printing').style.display = 'none';
+        document.getElementById('alert-paid').style.display = 'none';
+        document.getElementById('pay-now-btn').style.display = 'none';
+
+        // Show appropriate alert message
+        if (data.status === 'uploaded') {
+            document.getElementById('alert-uploading').style.display = 'block';
+        } else if (data.status === 'analyzing') {
+            document.getElementById('alert-analyzing').style.display = 'block';
+        } else if (data.status === 'quoted' || data.status === 'paying') {
+            document.getElementById('pay-now-btn').style.display = 'block';
+        } else if (data.status === 'paid') {
+            document.getElementById('alert-paid').style.display = 'block';
+        } else if (data.status === 'printing') {
+            document.getElementById('alert-printing').style.display = 'block';
+        } else if (data.status === 'completed') {
+            document.getElementById('alert-completed').style.display = 'block';
+        } else if (data.status === 'rejected') {
+            document.getElementById('alert-rejected').style.display = 'block';
+        }
+
+        // Update Timeline Nodes
+        const nodes = ['uploaded', 'analyzed', 'quoted', 'paid', 'printing', 'completed'];
+        const currentIdx = statusIndices[data.status];
+
+        // Special case: Rejected stops at index 1 (Analyzed) and makes it red
+        if (data.status === 'rejected') {
+            for (let i = 0; i < nodes.length; i++) {
+                const nodeEl = document.getElementById(`node-${nodes[i]}`);
+                const labelEl = document.getElementById(`label-${nodes[i]}`);
+                
+                nodeEl.className = 'timeline-node';
+                labelEl.className = 'timeline-label-item';
+                
+                if (i === 0) {
+                    nodeEl.classList.add('completed');
+                    labelEl.classList.add('completed');
+                } else if (i === 1) {
+                    nodeEl.classList.add('rejected');
+                    labelEl.classList.add('rejected');
+                    labelEl.textContent = 'REJECTED';
+                }
+            }
+            // Timeline line progress stops at node 1 (Analyzed)
+            document.getElementById('timeline-progress-bar').style.width = '20%';
+            return;
+        }
+
+        // Standard timeline progression
+        for (let i = 0; i < nodes.length; i++) {
+            const nodeEl = document.getElementById(`node-${nodes[i]}`);
+            const labelEl = document.getElementById(`label-${nodes[i]}`);
+            
+            nodeEl.className = 'timeline-node';
+            labelEl.className = 'timeline-label-item';
+            
+            if (i < currentIdx) {
+                nodeEl.classList.add('completed');
+                labelEl.classList.add('completed');
+            } else if (i === currentIdx) {
+                nodeEl.classList.add('current');
+                labelEl.classList.add('current');
+            }
+        }
+
+        // Restore Quoted text if modified by reject path
+        document.getElementById('label-analyzed').textContent = 'Analyzed';
+
+        // Calculate progress percentage for timeline progress bar
+        const percentMap = [0, 20, 40, 60, 80, 100];
+        const percent = percentMap[currentIdx] || 0;
+        document.getElementById('timeline-progress-bar').style.width = `${percent}%`;
+    }
+
+    // Run Polling
+    pollInterval = setInterval(pollStatus, 5000);
+    pollStatus(); // First fetch immediately
+</script>
+{% endblock %}

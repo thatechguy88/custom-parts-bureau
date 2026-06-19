@@ -1,0 +1,727 @@
+{% extends "base.html" %}
+
+{% block title %}The Custom Parts Bureau — Quote Analysis{% endblock %}
+
+{% block styles %}
+<style>
+    .quote-container {
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
+        animation: fadeIn 0.4s ease-out;
+    }
+
+    /* ─── LOADING STATE STYLING ─── */
+    .loading-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        text-align: center;
+        gap: 32px;
+    }
+
+    /* 3D Wireframe Cube Animation */
+    .cube-container {
+        width: 80px;
+        height: 80px;
+        perspective: 400px;
+        margin-bottom: 16px;
+    }
+
+    .wireframe-cube {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        transform-style: preserve-3d;
+        animation: rotateCube 6s infinite linear;
+    }
+
+    .cube-face {
+        position: absolute;
+        width: 80px;
+        height: 80px;
+        border: 1px solid var(--accent-blue);
+        background: rgba(0, 212, 255, 0.02);
+        box-shadow: 0 0 8px rgba(0, 212, 255, 0.15);
+    }
+
+    .face-front  { transform: rotateY(  0deg) translateZ(40px); }
+    .face-back   { transform: rotateY(180deg) translateZ(40px); }
+    .face-right  { transform: rotateY( 90deg) translateZ(40px); }
+    .face-left   { transform: rotateY(-90deg) translateZ(40px); }
+    .face-top    { transform: rotateX( 90deg) translateZ(40px); }
+    .face-bottom { transform: rotateX(-90deg) translateZ(40px); }
+
+    @keyframes rotateCube {
+        0% { transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg); }
+        100% { transform: rotateX(360deg) rotateY(360deg) rotateZ(360deg); }
+    }
+
+    /* Stage Status Items */
+    .stages-indicator {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+        max-width: 400px;
+        text-align: left;
+        background: #080808;
+        border: 1px solid var(--border);
+        padding: 20px;
+        border-radius: 4px;
+    }
+
+    .stage-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        opacity: 0.3;
+        transition: opacity 0.3s ease;
+    }
+
+    .stage-item.active {
+        opacity: 1;
+        color: var(--accent-blue);
+        text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+    }
+
+    .stage-item.completed {
+        opacity: 0.8;
+        color: var(--accent-green);
+    }
+
+    .stage-dot-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-dim);
+    }
+
+    .stage-item.active .stage-dot-indicator {
+        background: var(--accent-blue);
+        box-shadow: 0 0 8px var(--accent-blue);
+        animation: pulseGlow 1.5s infinite;
+    }
+
+    .stage-item.completed .stage-dot-indicator {
+        background: var(--accent-green);
+        box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    .live-feed-console {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: inherit;
+        min-height: 24px;
+        text-align: center;
+    }
+
+    /* ─── RESULT STATE STYLING ─── */
+    .result-panel {
+        display: none; /* Initially hidden, fade in by JS */
+        flex-direction: column;
+        gap: 24px;
+        opacity: 0;
+        transition: opacity 0.5s ease-out;
+    }
+
+    /* Decision Banner */
+    .decision-banner {
+        border-radius: 4px;
+        padding: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(10, 10, 10, 0.8);
+    }
+
+    .decision-banner.accepted {
+        border: 1px solid var(--accent-green);
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.15), inset 0 0 10px rgba(0, 255, 65, 0.05);
+    }
+
+    .decision-banner.conditional {
+        border: 1px solid var(--accent-orange);
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.15), inset 0 0 10px rgba(255, 215, 0, 0.05);
+    }
+
+    .decision-banner.rejected {
+        border: 1px solid var(--accent-red);
+        box-shadow: 0 0 15px rgba(255, 68, 68, 0.15), inset 0 0 10px rgba(255, 68, 68, 0.05);
+    }
+
+    .decision-details {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .decision-icon {
+        font-size: 32px;
+    }
+
+    .decision-title-text {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 2px;
+    }
+
+    .accepted .decision-title-text { color: var(--accent-green); }
+    .conditional .decision-title-text { color: var(--accent-orange); }
+    .rejected .decision-title-text { color: var(--accent-red); }
+
+    .decision-subtitle-text {
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-top: 2px;
+        letter-spacing: 0.5px;
+    }
+
+    .confidence-score-container {
+        text-align: right;
+    }
+
+    .confidence-num {
+        font-size: 24px;
+        font-weight: 700;
+    }
+
+    .accepted .confidence-num { color: var(--accent-green); }
+    .conditional .confidence-num { color: var(--accent-orange); }
+    .rejected .confidence-num { color: var(--accent-red); }
+
+    .confidence-label {
+        font-size: 9px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    /* Geometry Stats Grid */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+    }
+
+    .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 14px;
+        text-align: center;
+        transition: border-color 0.2s ease;
+    }
+
+    .stat-card:hover {
+        border-color: rgba(0, 212, 255, 0.3);
+    }
+
+    .stat-label {
+        font-size: 9px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 6px;
+    }
+
+    .stat-value {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-bright);
+    }
+
+    /* Cost Breakdown Terminal */
+    .breakdown-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 20px;
+    }
+
+    .terminal-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: inherit;
+    }
+
+    .terminal-table th {
+        text-align: left;
+        color: var(--accent-blue);
+        font-size: 11px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .terminal-table td {
+        padding: 10px 0;
+        font-size: 12px;
+    }
+
+    .terminal-table tr.total-row td {
+        border-top: 1px dashed var(--border);
+        padding-top: 12px;
+        font-weight: 700;
+        font-size: 14px;
+        color: var(--accent-green);
+    }
+
+    .terminal-table .cost-align-right {
+        text-align: right;
+    }
+
+    /* Reasoning Card */
+    .reasoning-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--accent-blue);
+        border-radius: 4px;
+        padding: 20px;
+    }
+
+    .reasoning-header {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--accent-blue);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .reasoning-body {
+        font-size: 12px;
+        color: var(--text);
+        line-height: 1.6;
+        white-space: pre-wrap;
+        max-height: 250px;
+        overflow-y: auto;
+        padding-right: 8px;
+    }
+
+    /* Action Panel */
+    .action-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        margin-top: 12px;
+    }
+
+    .pay-btn {
+        width: 100%;
+        height: 50px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+    }
+
+    .revised-btn {
+        width: 100%;
+        height: 50px;
+        font-size: 13px;
+        font-weight: 700;
+        border-color: var(--accent-red);
+        color: var(--accent-red);
+        box-shadow: 0 0 15px rgba(255, 68, 68, 0.2);
+    }
+
+    .revised-btn:hover {
+        background: rgba(255, 68, 68, 0.1);
+        box-shadow: 0 0 20px rgba(255, 68, 68, 0.4);
+        text-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+    }
+
+    .view-status-link {
+        font-size: 11px;
+        color: var(--text-dim);
+        text-decoration: none;
+        letter-spacing: 1px;
+        transition: color 0.2s ease;
+    }
+
+    .view-status-link:hover {
+        color: var(--accent-blue);
+        text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+    }
+
+    @keyframes pulseGlow {
+        0%, 100% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.2); opacity: 1; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="quote-container">
+    <!-- ─── LOADING STATE PANEL ─── -->
+    <div class="loading-panel" id="loading-panel">
+        <div class="cube-container">
+            <div class="wireframe-cube">
+                <div class="cube-face face-front"></div>
+                <div class="cube-face face-back"></div>
+                <div class="cube-face face-right"></div>
+                <div class="cube-face face-left"></div>
+                <div class="cube-face face-top"></div>
+                <div class="cube-face face-bottom"></div>
+            </div>
+        </div>
+
+        <div class="stages-indicator">
+            <div class="stage-item" id="stage-1">
+                <div class="stage-dot-indicator"></div>
+                <div>01/ GEOMETRY MESH ANALYSIS</div>
+            </div>
+            <div class="stage-item" id="stage-2">
+                <div class="stage-dot-indicator"></div>
+                <div>02/ MANUFACTURING COST COMPILATION</div>
+            </div>
+            <div class="stage-item" id="stage-3">
+                <div class="stage-dot-indicator"></div>
+                <div>03/ NEMOTRON 3 ULTRA PHYSICAL REASONING</div>
+            </div>
+        </div>
+
+        <div class="live-feed-console" id="loading-feed">
+            Initializing connection to pipeline daemon...
+        </div>
+    </div>
+
+    <!-- ─── RESULT STATE PANEL ─── -->
+    <div class="result-panel" id="result-panel">
+        <!-- Decision Banner -->
+        <div class="decision-banner" id="decision-banner-el">
+            <div class="decision-details">
+                <div class="decision-icon" id="decision-icon-el">✅</div>
+                <div>
+                    <div class="decision-title-text" id="decision-title-el">QUOTE ACCEPTED</div>
+                    <div class="decision-subtitle-text" id="decision-sub-el">Mesh meets print requirements. Ready for FDM extraction.</div>
+                </div>
+            </div>
+            <div class="confidence-score-container">
+                <div class="confidence-num" id="confidence-score-el">92.1%</div>
+                <div class="confidence-label">Confidence Score</div>
+            </div>
+        </div>
+
+        <!-- Geometry Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Volume</div>
+                <div class="stat-value" id="val-volume">-- cm³</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Bounding Box</div>
+                <div class="stat-value" id="val-bbox">-- mm</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Overhang Area</div>
+                <div class="stat-value" id="val-overhang">-- %</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Min Wall</div>
+                <div class="stat-value" id="val-wall">-- mm</div>
+            </div>
+        </div>
+
+        <!-- Cost Breakdown Box -->
+        <div class="breakdown-box">
+            <table class="terminal-table">
+                <thead>
+                    <tr>
+                        <th>Job Itemization</th>
+                        <th class="cost-align-right">Estimated Cost (USD)</th>
+                    </tr>
+                </thead>
+                <tbody id="line-items-body">
+                    <!-- Javascript populates this -->
+                    <tr>
+                        <td>PLA Filament</td>
+                        <td class="cost-align-right">$0.00</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Reasoning explanation card -->
+        <div class="reasoning-card">
+            <div class="reasoning-header">
+                <span>🧠</span> Nemotron 3 Ultra Analysis
+            </div>
+            <div class="reasoning-body" id="reasoning-text-el">
+                Generating reasoning...
+            </div>
+        </div>
+
+        <!-- Actions Panel -->
+        <div class="action-panel" id="action-panel-el">
+            <button class="btn pay-btn" id="checkout-btn" onclick="startStripeCheckout()">
+                Pay & Start Print job
+            </button>
+            <a href="/" class="btn revised-btn" id="upload-new-btn" style="display: none;">
+                ↩ Upload a Revised File
+            </a>
+            <a href="#" class="view-status-link" id="status-link-el">View order status log</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const jobId = "{{ job_id }}";
+    
+    // Polling parameters
+    let pollInterval = null;
+    let loadingStageTimer = null;
+    let currentStage = 1;
+    let apiData = null;
+    let fakeCounterInterval = null;
+
+    // Load console strings for fake activity feeds
+    const stageFeeds = {
+        1: [
+            "Opening binary STL stream...",
+            "Validating watertight index...",
+            "Generating vertex buffer indices...",
+            "Computing triangle area vectors..."
+        ],
+        2: [
+            "Parsing cost matrices...",
+            "Simulating filament extrusion paths...",
+            "Factoring machine runtime constraints...",
+            "Adding support overhead factors..."
+        ],
+        3: [
+            "Sending prompt context to Nemotron 3 Ultra...",
+            "Awaiting LLM response stream...",
+            "Verifying structured output format...",
+            "Compiling final physics check report..."
+        ]
+    };
+
+    let feedIndex = 0;
+
+    function animateFeed() {
+        const feedContainer = document.getElementById('loading-feed');
+        const feeds = stageFeeds[currentStage];
+        if (feeds) {
+            feedContainer.textContent = `▸ ${feeds[feedIndex]}`;
+            feedIndex = (feedIndex + 1) % feeds.length;
+        }
+    }
+
+    // Initialize loading screen simulations
+    function startLoadingSimulation() {
+        // Run feed tick every 1.5s
+        setInterval(animateFeed, 1500);
+
+        // Visual transition timer for the stages (minimum 2.5 seconds per stage)
+        setStage(1);
+        
+        loadingStageTimer = setInterval(() => {
+            if (currentStage === 1) {
+                setStage(2);
+            } else if (currentStage === 2) {
+                setStage(3);
+            } else {
+                clearInterval(loadingStageTimer);
+                loadingStageTimer = null;
+                // Done with timers, check if API has results, else wait for poll
+                if (apiData && apiData.status !== 'analyzing' && apiData.status !== 'uploaded') {
+                    renderResult(apiData);
+                }
+            }
+        }, 3000);
+    }
+
+    function setStage(stageNum) {
+        currentStage = stageNum;
+        feedIndex = 0;
+        animateFeed();
+        
+        // Update DOM classes
+        for (let i = 1; i <= 3; i++) {
+            const el = document.getElementById(`stage-${i}`);
+            el.className = 'stage-item';
+            if (i < stageNum) {
+                el.classList.add('completed');
+            } else if (i === stageNum) {
+                el.classList.add('active');
+            }
+        }
+    }
+
+    // Call API quote endpoint
+    function pollJobStatus() {
+        fetch(`/api/quote/${jobId}`)
+        .then(res => {
+            if (!res.ok) throw new Error("Connection failed");
+            return res.json();
+        })
+        .then(data => {
+            apiData = data;
+            // If the backend has finished, and we've finished our animations, show the results
+            if (data.status !== 'analyzing' && data.status !== 'uploaded') {
+                // If we've completed stage timers, show results immediately
+                if (currentStage === 3 && !loadingStageTimer) {
+                    renderResult(data);
+                }
+            }
+        })
+        .catch(err => {
+            console.error("Polling error: ", err);
+        });
+    }
+
+    // Run Polling
+    pollInterval = setInterval(pollJobStatus, 2000);
+    startLoadingSimulation();
+    pollJobStatus(); // First fetch immediately
+
+    // Render results
+    function renderResult(data) {
+        clearInterval(pollInterval);
+        
+        // Set values in UI
+        document.getElementById('val-volume').textContent = `${data.volume_cm3 ? data.volume_cm3.toFixed(2) : '--'} cm³`;
+        document.getElementById('val-bbox').textContent = data.bounding_box || '--';
+        document.getElementById('val-overhang').textContent = `${data.overhang_pct ? data.overhang_pct.toFixed(1) : '0.0'}%`;
+        document.getElementById('val-wall').textContent = `${data.min_wall_mm ? data.min_wall_mm.toFixed(2) : '--'} mm`;
+        document.getElementById('confidence-score-el').textContent = `${data.confidence ? data.confidence.toFixed(1) : '0.0'}%`;
+        
+        // Set reasoning text (prefer Nemotron, fallback to built-in if missing or API error)
+        let explanationText = data.nemotron_explanation;
+        if (!explanationText || explanationText.includes('[Nemotron API error:')) {
+            explanationText = data.reasoning_text || "No analysis report compiled.";
+        }
+        document.getElementById('reasoning-text-el').textContent = explanationText;
+
+        // Populate Line items table
+        const tbody = document.getElementById('line-items-body');
+        tbody.innerHTML = '';
+        
+        if (data.line_items && data.line_items.length > 0) {
+            data.line_items.forEach(item => {
+                const tr = document.createElement('tr');
+                const isSubtotal = item.label.toLowerCase() === 'subtotal';
+                const isTotal = item.label.toLowerCase().includes('total');
+                const isMargin = item.label.toLowerCase().includes('margin');
+                
+                if (isSubtotal) {
+                    tr.style.borderTop = '1px solid var(--border)';
+                }
+                
+                const labelTd = document.createElement('td');
+                labelTd.textContent = item.label;
+                if (item.detail) {
+                    labelTd.innerHTML += ` <span style="font-size:10px; color:var(--text-dim);">(${item.detail})</span>`;
+                }
+                
+                const costTd = document.createElement('td');
+                costTd.className = 'cost-align-right';
+                costTd.textContent = `$${item.cost_usd.toFixed(2)}`;
+
+                tr.appendChild(labelTd);
+                tr.appendChild(costTd);
+                tbody.appendChild(tr);
+            });
+        }
+        
+        // Add final total row
+        const totalTr = document.createElement('tr');
+        totalTr.className = 'total-row';
+        const totalLabelTd = document.createElement('td');
+        totalLabelTd.textContent = 'TOTAL ESTIMATED COST';
+        const totalValTd = document.createElement('td');
+        totalValTd.className = 'cost-align-right';
+        totalValTd.textContent = `$${data.total_usd ? data.total_usd.toFixed(2) : '0.00'}`;
+        
+        totalTr.appendChild(totalLabelTd);
+        totalTr.appendChild(totalValTd);
+        tbody.appendChild(totalTr);
+
+        // Adjust decision banner style
+        const banner = document.getElementById('decision-banner-el');
+        const titleEl = document.getElementById('decision-title-el');
+        const subEl = document.getElementById('decision-sub-el');
+        const iconEl = document.getElementById('decision-icon-el');
+        const checkoutBtn = document.getElementById('checkout-btn');
+        const uploadNewBtn = document.getElementById('upload-new-btn');
+        
+        // Setup status link path
+        document.getElementById('status-link-el').href = `/status/${data.job_id}`;
+
+        if (data.decision === 'ACCEPT') {
+            banner.className = 'decision-banner accepted';
+            titleEl.textContent = 'QUOTE ACCEPTED';
+            subEl.textContent = 'Geometry matches FDM print requirements. Excellent structural integrity.';
+            iconEl.textContent = '✅';
+            checkoutBtn.textContent = `Pay $${data.total_usd.toFixed(2)} & Start Print Job`;
+        } else if (data.decision === 'CONDITIONAL') {
+            banner.className = 'decision-banner conditional';
+            titleEl.textContent = 'CONDITIONAL APPROVAL';
+            subEl.textContent = 'Minor geometric anomalies detected (thin walls/overhangs). Print requires configuration safeguards.';
+            iconEl.textContent = '⚠️';
+            checkoutBtn.textContent = `Pay $${data.total_usd.toFixed(2)} & Print with Safeguards`;
+        } else {
+            // REJECT
+            banner.className = 'decision-banner rejected';
+            titleEl.textContent = 'QUOTE REJECTED';
+            subEl.textContent = 'Geometry fails print tolerances. Manufacturing cannot guarantee structural viability.';
+            iconEl.textContent = '❌';
+            
+            // Hide checkout button, show restart link
+            checkoutBtn.style.display = 'none';
+            uploadNewBtn.style.display = 'block';
+        }
+
+        // Swap views with a smooth transition
+        const loadingPanel = document.getElementById('loading-panel');
+        const resultPanel = document.getElementById('result-panel');
+        
+        loadingPanel.style.display = 'none';
+        resultPanel.style.display = 'flex';
+        
+        // Trigger reflow & fade in
+        setTimeout(() => {
+            resultPanel.style.opacity = '1';
+        }, 50);
+    }
+
+    // Handle checkout button click
+    function startStripeCheckout() {
+        const checkoutBtn = document.getElementById('checkout-btn');
+        checkoutBtn.disabled = true;
+        checkoutBtn.textContent = 'REDIRECTING TO SECURE GATEWAY...';
+
+        fetch(`/api/checkout/${jobId}`, {
+            method: 'POST'
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Stripe session failed");
+            return res.json();
+        })
+        .then(data => {
+            if (data.checkout_url) {
+                // Redirect user to Stripe hosted checkout page
+                window.location.href = data.checkout_url;
+            } else {
+                throw new Error("Stripe checkout URL missing");
+            }
+        })
+        .catch(err => {
+            checkoutBtn.disabled = false;
+            checkoutBtn.textContent = 'Pay & Start Print Job';
+            alert(`Payment Gateway Error: ${err.message}`);
+        });
+    }
+</script>
+{% endblock %}

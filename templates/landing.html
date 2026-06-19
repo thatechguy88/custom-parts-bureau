@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+
+{% block title %}The Custom Parts Bureau — Upload STL{% endblock %}
+
+{% block styles %}
+<style>
+    .landing-container {
+        width: 100%;
+        max-width: 720px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+        animation: fadeIn 0.4s ease-out;
+    }
+
+    .hero-section {
+        text-align: center;
+        margin-bottom: 8px;
+    }
+
+    .hero-title {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--accent-green);
+        letter-spacing: 4px;
+        margin-bottom: 8px;
+        text-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+    }
+
+    .hero-tagline {
+        font-size: 13px;
+        color: var(--accent-blue);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        text-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+    }
+
+    /* Upload Box */
+    .upload-box {
+        border: 2px dashed rgba(0, 212, 255, 0.2);
+        background: var(--surface);
+        border-radius: 4px;
+        padding: 40px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 260px;
+        position: relative;
+    }
+
+    .upload-box:hover, .upload-box.dragover {
+        border-color: var(--accent-green);
+        background: rgba(0, 255, 65, 0.02);
+        box-shadow: 0 0 20px rgba(0, 255, 65, 0.1), inset 0 0 15px rgba(0, 255, 65, 0.05);
+    }
+
+    .upload-icon {
+        font-size: 48px;
+        color: var(--accent-blue);
+        margin-bottom: 16px;
+        transition: transform 0.3s ease, color 0.3s ease;
+        text-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+    }
+
+    .upload-box:hover .upload-icon, .upload-box.dragover .upload-icon {
+        transform: scale(1.1);
+        color: var(--accent-green);
+        text-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+    }
+
+    .upload-text {
+        font-size: 14px;
+        color: var(--text-bright);
+        margin-bottom: 8px;
+        letter-spacing: 1px;
+    }
+
+    .upload-subtext {
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.5px;
+    }
+
+    /* Selected File State */
+    .file-selected-info {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        animation: scaleUp 0.3s ease-out;
+    }
+
+    .file-selected-icon {
+        font-size: 40px;
+        color: var(--accent-green);
+        text-shadow: 0 0 15px rgba(0, 255, 65, 0.4);
+    }
+
+    .file-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--accent-green);
+        word-break: break-all;
+    }
+
+    .file-size {
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+
+    /* Form Fields */
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .form-label {
+        font-size: 10px;
+        color: var(--text-dim);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+    }
+
+    .input-terminal {
+        background: #080808;
+        border: 1px solid var(--border);
+        color: var(--text-bright);
+        font-family: inherit;
+        font-size: 13px;
+        padding: 12px 16px;
+        border-radius: 4px;
+        outline: none;
+        transition: all 0.2s ease;
+        letter-spacing: 1px;
+    }
+
+    .input-terminal:focus {
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+    }
+
+    /* Error Message Panel */
+    .error-console {
+        display: none;
+        background: rgba(255, 68, 68, 0.05);
+        border: 1px solid rgba(255, 68, 68, 0.3);
+        border-radius: 4px;
+        padding: 12px 16px;
+        color: var(--accent-red);
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        margin-top: 8px;
+        text-shadow: 0 0 5px rgba(255, 68, 68, 0.2);
+        animation: fadeIn 0.2s ease-out;
+    }
+
+    /* How It Works cards */
+    .how-it-works {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 16px;
+        margin-top: 16px;
+    }
+
+    .step-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 16px;
+        position: relative;
+    }
+
+    .step-card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 2px;
+        border-radius: 4px 4px 0 0;
+    }
+
+    .step-card.step-1::before { background: var(--accent-green); }
+    .step-card.step-2::before { background: var(--accent-blue); }
+    .step-card.step-3::before { background: var(--accent-orange); }
+
+    .step-num {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+        letter-spacing: 1px;
+    }
+    
+    .step-card.step-1 .step-num { color: rgba(0, 255, 65, 0.4); }
+    .step-card.step-2 .step-num { color: rgba(0, 212, 255, 0.4); }
+    .step-card.step-3 .step-num { color: rgba(255, 215, 0, 0.4); }
+
+    .step-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-bright);
+        margin-bottom: 6px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+    }
+
+    .step-desc {
+        font-size: 10px;
+        color: var(--text-dim);
+        line-height: 1.4;
+    }
+
+    /* Upload Loading state overlay */
+    .upload-overlay {
+        display: none;
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(10, 10, 10, 0.9);
+        z-index: 5;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+    }
+
+    .spinner {
+        width: 32px;
+        height: 32px;
+        border: 2px solid rgba(0, 212, 255, 0.2);
+        border-top-color: var(--accent-blue);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes scaleUp {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="landing-container">
+    <div class="hero-section">
+        <h1 class="hero-title">THE CUSTOM PARTS BUREAU</h1>
+        <p class="hero-tagline">AI-Powered Instant Quoting for 3D Printing</p>
+    </div>
+
+    <form id="upload-form" class="terminal-card" onsubmit="handleFormSubmit(event)">
+        <!-- Hidden file input -->
+        <input type="file" id="file-input" name="file" accept=".stl" style="display: none;" onchange="handleFileSelect(event)">
+        
+        <!-- Drag & Drop Container -->
+        <div class="upload-box" id="drop-zone" onclick="triggerFileSelect()">
+            <!-- Loading Overlay -->
+            <div class="upload-overlay" id="loading-overlay">
+                <div class="spinner"></div>
+                <div style="font-size: 11px; letter-spacing: 2px; color: var(--accent-blue);">UPLOADING MODEL DATA...</div>
+            </div>
+
+            <!-- Empty / Drag State -->
+            <div class="upload-prompt" id="upload-prompt-view">
+                <div class="upload-icon">◆</div>
+                <p class="upload-text">DRAG & DROP STL FILE HERE</p>
+                <p class="upload-subtext">or click to browse local filesystem</p>
+                <p class="upload-subtext" style="margin-top: 10px; font-size: 9px; opacity: 0.6;">MAXIMUM FILE SIZE: 50MB</p>
+            </div>
+
+            <!-- Selected File State -->
+            <div class="file-selected-info" id="file-info-view">
+                <div class="file-selected-icon">▲</div>
+                <div class="file-name" id="selected-file-name">part_model.stl</div>
+                <div class="file-size" id="selected-file-size">1.2 MB</div>
+                <p class="upload-subtext" style="margin-top: 10px;">Click to replace file</p>
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 24px;">
+            <label class="form-label" for="email-input">Client Email Address</label>
+            <input type="email" id="email-input" name="email" class="input-terminal" placeholder="operator@bureau.internal" required>
+        </div>
+
+        <div class="error-console" id="error-box">
+            ERROR: System failure message goes here.
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn" style="width: 100%; margin-top: 24px; height: 46px;" disabled>
+            ⚡ Analyze & Quote
+        </button>
+    </form>
+
+    <!-- How It Works Panel -->
+    <div class="how-it-works">
+        <div class="step-card step-1">
+            <div class="step-num">01</div>
+            <div class="step-title">UPLOAD</div>
+            <p class="step-desc">Drop your STL model. Mesh verification and sizing run locally on load.</p>
+        </div>
+        <div class="step-card step-2">
+            <div class="step-num">02</div>
+            <div class="step-title">ANALYZE</div>
+            <p class="step-desc">Ray-tracing analysis estimates overhang areas and checks minimum wall thickness.</p>
+        </div>
+        <div class="step-card step-3">
+            <div class="step-num">03</div>
+            <div class="step-title">QUOTE</div>
+            <p class="step-desc">Nemotron 3 Ultra synthesizes pricing with physical design validation reasoning.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const emailInput = document.getElementById('email-input');
+    const submitBtn = document.getElementById('submit-btn');
+    const errorBox = document.getElementById('error-box');
+    const uploadPrompt = document.getElementById('upload-prompt-view');
+    const fileInfoView = document.getElementById('file-info-view');
+    const selectedFileName = document.getElementById('selected-file-name');
+    const selectedFileSize = document.getElementById('selected-file-size');
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    let selectedFile = null;
+
+    // Enable/Disable Submit Button based on form validity
+    function checkFormValidity() {
+        const isEmailValid = emailInput.checkValidity() && emailInput.value.trim() !== '';
+        const isFileSelected = selectedFile !== null;
+        submitBtn.disabled = !(isEmailValid && isFileSelected);
+    }
+
+    emailInput.addEventListener('input', checkFormValidity);
+
+    // Trigger file chooser
+    function triggerFileSelect() {
+        if (!selectedFile) {
+            fileInput.click();
+        }
+    }
+
+    // Replace selected file click handler
+    dropZone.addEventListener('click', (e) => {
+        // If click is within the file info display when a file is selected, let them choose a new file
+        if (selectedFile) {
+            e.stopPropagation();
+            fileInput.click();
+        }
+    });
+
+    // File selection handler
+    function handleFileSelect(e) {
+        const files = e.target.files;
+        if (files.length > 0) {
+            processFile(files[0]);
+        }
+    }
+
+    // Process file
+    function processFile(file) {
+        errorBox.style.display = 'none';
+        
+        if (!file.name.toLowerCase().endsWith('.stl')) {
+            showError("INVALID FILE: Only binary or ASCII STL files are accepted.");
+            selectedFile = null;
+            updateFileView();
+            return;
+        }
+
+        if (file.size > 50 * 1024 * 1024) {
+            showError("FILE TOO LARGE: Maximum allowed mesh size is 50 megabytes.");
+            selectedFile = null;
+            updateFileView();
+            return;
+        }
+
+        selectedFile = file;
+        updateFileView();
+    }
+
+    function updateFileView() {
+        if (selectedFile) {
+            selectedFileName.textContent = selectedFile.name;
+            selectedFileSize.textContent = formatBytes(selectedFile.size);
+            uploadPrompt.style.display = 'none';
+            fileInfoView.style.display = 'flex';
+        } else {
+            uploadPrompt.style.display = 'block';
+            fileInfoView.style.display = 'none';
+            fileInput.value = '';
+        }
+        checkFormValidity();
+    }
+
+    function formatBytes(bytes, decimals = 1) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    // Drag & Drop event handlers
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            processFile(files[0]);
+        }
+    });
+
+    function showError(msg) {
+        errorBox.textContent = `CRITICAL ERROR: ${msg}`;
+        errorBox.style.display = 'block';
+    }
+
+    // Form Submit Handler
+    function handleFormSubmit(e) {
+        e.preventDefault();
+        if (!selectedFile) return;
+
+        loadingOverlay.style.display = 'flex';
+        submitBtn.disabled = true;
+        emailInput.disabled = true;
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('email', emailInput.value.trim());
+
+        fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(data => { throw new Error(data.error || 'Server error') });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.job_id) {
+                // Redirect to the quote page
+                window.location.href = `/quote/${data.job_id}`;
+            } else {
+                throw new Error("No job ID received from manufacturing pipeline");
+            }
+        })
+        .catch(err => {
+            loadingOverlay.style.display = 'none';
+            submitBtn.disabled = false;
+            emailInput.disabled = false;
+            showError(err.message || "Failed to transmit file to the remote agent.");
+        });
+    }
+</script>
+{% endblock %}

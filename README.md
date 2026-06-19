@@ -1,97 +1,99 @@
-# 🔧 The Custom Parts Bureau — STL Analysis & Cost Estimator
+# 🔧 The Custom Parts Bureau — STL Analysis, Quoting, and P&L System
 
-> **Hermes Agent Accelerated Business Hackathon** (NVIDIA / Stripe / Nous Research)
+> **Submission for the Hermes Agent Accelerated Business Hackathon** (NVIDIA / Stripe / Nous Research)
 
-An AI-powered 3D printing business that analyzes STL files, estimates costs, and makes accept/reject decisions with physical reasoning. The "refusal moment" — rejecting bad models with specific structural reasoning — is the demo centerpiece.
+An AI-powered 3D printing business that analyzes uploaded STL files, estimates manufacturing costs, dynamically adjusts margins based on risk, and makes accept/reject decisions with natural language reasoning powered by Nemotron 3 Ultra. 
 
-## Quick Start
+The centerpiece is the **"refusal moment"** — automatically rejecting unprintable or structurally flawed models (such as thin walls or extreme overhangs) with physics-grounded explanation text, and handling Stripe Checkouts dynamically.
 
+---
+
+## 🚀 Quick Start (Web Server)
+
+The application is structured to run locally on your host or directly inside a Docker container.
+
+### Method 1: Local Virtual Environment
 ```bash
-# Install dependencies
-pip3 install trimesh numpy rtree scipy networkx
+# 1. Activate the environment and install dependencies
+source venv/bin/activate
+pip install -r requirements.txt
 
-# Run the demo on any STL file
-python3 demo.py path/to/model.stl
+# 2. Start the Flask application
+python3 app.py
+```
+*Access the interface at: **http://localhost:5001***
 
-# Run on test files
-python3 demo.py test_stl/cube.stl          # ✅ ACCEPTED (100/100)
-python3 demo.py test_stl/overhang_test.stl  # ⚠️ CONDITIONAL (67/100)
-python3 demo.py test_stl/thin_walls.stl     # ⚠️ CONDITIONAL (41/100)
-python3 demo.py test_stl/bracket.stl        # ✅ ACCEPTED (79/100)
+### Method 2: Inside Docker (Port 8080)
+If you are running in a dockerized environment, bind the workspace and map the ports:
+```bash
+# 1. Build and run the python environment container
+docker run -d --name project-server \
+  -v "$(pwd)":/project \
+  -p 8080:8080 \
+  -e PORT=8080 \
+  -e HOST=0.0.0.0 \
+  -w /project \
+  python:3.11-slim \
+  sh -c "pip install -r requirements.txt && python3 app.py"
+```
+*Access the interface at: **http://localhost:8080***
+
+---
+
+## 🗺️ Interface Map
+
+| URL | What It Serves |
+|-----|----------------|
+| `/` | **Landing Page**: Drag-and-drop STL upload zone & client email capture |
+| `/quote/<job_id>` | **Quoting Terminal**: Displays spinning 3D loading wireframe, itemized costs, and Nemotron reasoning |
+| `/status/<job_id>` | **Order Timeline**: Pulse-glowing status tracking (Uploaded ➔ Analyzed ➔ Paid ➔ Printing ➔ Done) |
+| `/dashboard` | **Operator Panel**: Real-time financial P&L metrics, Kanban queues, and agent chat logs |
+
+---
+
+## 🛠️ Architecture
+
+```
+custom-parts-bureau/
+├── app.py                  ➔ Flask Application (API routers & background threads)
+├── models.py               ➔ Database Layer (SQLite schema & Job CRUD operations)
+├── adapters.py             ➔ Mismatch Bridges (Adapts quote output to Stripe & Dashboard)
+├── templates/              ➔ Monospace dark-CRT style views (Jinja2)
+│   ├── base.html           ➔ Shared visual shell (scanlines, custom fonts)
+│   ├── landing.html        ➔ Drag/drop upload page
+│   ├── quote.html          ➔ 3-stage loading and quote cards
+│   └── status.html         ➔ Progress bar order status
+├── stl_analyzer.py         ➔ Ray-cast wall thickness, overhang, & watertight checks
+├── cost_estimator.py       ➔ dynamic risk margin cost compiler
+├── quote_generator.py      ➔ Decision rules (Accept >=70, Conditional 30-70, Reject <30)
+├── nemotron_reasoning.py   ➔ NVIDIA API caller for Nemotron 3 Ultra (550B)
+└── stripe_integration.py   ➔ Stripe Checkout Session and payment links generator
 ```
 
-## Architecture
+---
 
-```
-stl_analyzer.py     → Geometry analysis (volume, overhang, wall thickness, integrity)
-cost_estimator.py   → Cost estimation (material, machine, support, margin)
-quote_generator.py  → Quote generation with Nemotron reasoning prompts
-demo.py             → Full pipeline demo with formatted output
-generate_tests.py   → Test STL file generator
-test_stl/           → Sample STL files for testing
-```
+## 🔑 Environment Configuration (`.env`)
 
-## What It Analyzes
-
-| Metric | Description |
-|--------|-------------|
-| **Volume** | Model volume in cm³ |
-| **Surface Area** | Total surface area in cm² |
-| **Bounding Box** | Dimensions in mm |
-| **Overhang %** | Percentage of surface exceeding 45° threshold |
-| **Wall Thickness** | Min/avg/max via ray-casting (tolerance: 0.8mm) |
-| **Mesh Integrity** | Watertight, winding consistency, degenerate faces |
-| **Confidence Score** | 0-100 structural confidence rating |
-
-## Cost Model
-
-| Component | Default Rate |
-|-----------|-------------|
-| PLA Filament | $0.03/cm³ |
-| Machine Time | $4.00/hr |
-| Support Material | $0.05/cm³ |
-| Base Margin | 30% |
-| Risk Margin | Up to +50% (confidence-adjusted) |
-
-## Decision Thresholds
-
-| Confidence | Decision |
-|-----------|----------|
-| ≥ 70 | ✅ ACCEPT |
-| 30-70 | ⚠️ CONDITIONAL |
-| < 30 | ❌ REJECT |
-
-## JSON API Output
-
-The script outputs structured JSON for API integration:
-
-```json
-{
-  "quote_id": "Q-20260619-CUBE.STL",
-  "decision": "ACCEPT",
-  "confidence": 100.0,
-  "total_usd": 3.78,
-  "analysis_summary": { ... },
-  "reasoning_text": "..."
-}
+Create a `.env` file in the root directory:
+```ini
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_SECRET_KEY=sk_test_...
+NVIDIA_API_KEY=nvapi-...
 ```
 
-## Nemotron Integration
+* **Stripe Sandbox:** Handles test card entries (`4242 4242 4242 4242`).
+* **Direct Verification Fallback:** Bypasses local webhook constraints by directly polling the Stripe API on redirection (`?payment=success`), immediately transitioning job status to `paid`.
+* **Nemotron Fail-fast:** The reasoning API is configured with a 15-second timeout. If the remote endpoint is congested, the system falls back to structured engineering summaries to keep the customer loading screen fast.
 
-The `nemotron_prompt` field in the JSON output contains a structured prompt for Nemotron 3 Ultra to expand into natural language customer explanations.
+---
 
-## Files
+## 📦 Sandbox Agent Integration (NemoClaw)
 
-| File | Purpose |
-|------|---------|
-| `stl_analyzer.py` | Core geometry analysis module |
-| `cost_estimator.py` | Cost calculation with dynamic pricing |
-| `quote_generator.py` | Quote generation with decision logic |
-| `demo.py` | Full pipeline demo script |
-| `generate_tests.py` | Test STL file generator |
-| `requirements.txt` | Python dependencies |
-| `test_stl/` | Sample STL files |
+The NemoClaw agent resides in the `openshell` container, mounting the project at `/sandbox/project`.
 
-## License
-
-Hackathon project — NVIDIA/Stripe/Nous Research Hermes Agent Accelerated Business Hackathon.
+1. **System Monitoring:** The agent can poll server health via:
+   `curl -s http://172.18.0.1:8080/api/dashboard-data`
+2. **Quote Quality Audits:** The agent can run python QA scripts directly against the shared database file:
+   `/sandbox/project/cpb.db`
+3. **Internal Run:** The agent can run testing cycles inside its container using the virtualenv:
+   `/sandbox/venv/bin/python /sandbox/project/app.py`

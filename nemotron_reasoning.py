@@ -176,7 +176,7 @@ def generate_reasoning(quote) -> dict:
             f"{api_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=120,
+            timeout=15,
         )
         response.raise_for_status()
         data = response.json()

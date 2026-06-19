@@ -1265,20 +1265,36 @@ let notifications = [
 // ══════════════════════════════════════════════════════════════
 // LIVE DATA FETCH
 // ═══════════════════════════════════════════════════════════════
+const mockJobs = [...jobs];
+const mockNotifications = [...notifications];
+
 let fetchInProgress = false;
 async function fetchData() {
     if (fetchInProgress) return false;
     fetchInProgress = true;
     try {
-        const response = await fetch('results.json', { cache: 'no-store' });
+        const response = await fetch('/api/dashboard-data', { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
-        jobs = data.jobs;
-        notifications = data.notifications;
-        // Optionally update stats if needed
+        
+        if (data.jobs && data.jobs.length > 0) {
+            if (data.jobs.length < 5) {
+                // Merge real jobs at the beginning of mock jobs, filtering out duplicates by id
+                const realIds = new Set(data.jobs.map(j => j.id));
+                const filteredMockJobs = mockJobs.filter(mj => !realIds.has(mj.id));
+                jobs = [...data.jobs, ...filteredMockJobs];
+                
+                // Do same for notifications
+                const newNotifs = data.notifications || [];
+                notifications = [...newNotifs, ...mockNotifications];
+            } else {
+                jobs = data.jobs;
+                notifications = data.notifications || [];
+            }
+        }
         return true;
     } catch (err) {
-        console.warn('Failed to fetch results.json:', err);
+        console.warn('Failed to fetch dashboard data, using mock data:', err);
         return false;
     } finally {
         fetchInProgress = false;
@@ -1290,7 +1306,7 @@ function updateUI() {
     renderKanban();
     renderNotifications();
     if (selectedJobId) {
-        selectJob(printingJob.id);
+        selectJob(selectedJobId);
     }
 }
 
@@ -1327,10 +1343,12 @@ const chatResponses = {
 let selectedJobId = null;
 
 function getTimeAgo(dateStr) {
-  const now = new Date("2026-06-19T12:46:00");
+  const now = new Date();
   const then = new Date(dateStr);
   const diffMs = now - then;
+  if (isNaN(diffMs) || diffMs < 0) return "Just now";
   const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Just now";
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   return `${diffHr}h ${diffMin % 60}m ago`;
@@ -1699,6 +1717,9 @@ function init() {
       selectJob(jobs[0].id);
     }
   });
+
+  // Initialize Chat handlers
+  initChat();
 
   // Simulate printing progress every 8 seconds
   setInterval(simulateProgress, 8000);
