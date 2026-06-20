@@ -1301,12 +1301,21 @@ async function fetchData() {
     }
 }
 
+let lastRenderedJobState = null;
+
 function updateUI() {
     renderMetrics();
     renderKanban();
     renderNotifications();
     if (selectedJobId) {
-        selectJob(selectedJobId);
+        const job = jobs.find(j => j.id === selectedJobId);
+        if (job) {
+            const jobState = `${job.status}-${job.print_progress}-${job.payment_status}-${job.reasoning ? job.reasoning.length : 0}`;
+            if (jobState !== lastRenderedJobState) {
+                selectJob(selectedJobId);
+                lastRenderedJobState = jobState;
+            }
+        }
     }
 }
 
@@ -1456,6 +1465,8 @@ function selectJob(jobId) {
   selectedJobId = jobId;
   const job = jobs.find(j => j.id === jobId);
   if (!job) return;
+
+  lastRenderedJobState = `${job.status}-${job.print_progress}-${job.payment_status}-${job.reasoning ? job.reasoning.length : 0}`;
 
   renderKanban(); // re-render to update selection
 
