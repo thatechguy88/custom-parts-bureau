@@ -289,17 +289,23 @@ Keep it under 200 words.
 
 def generate_quote(
     analysis: GeometryAnalysis,
+    material: str = "PLA",
+    rush: bool = False,
     estimate: Optional[CostEstimate] = None,
     min_confidence: float = MIN_CONFIDENCE_ACCEPT,
     auto_accept_confidence: float = AUTO_ACCEPT_CONFIDENCE,
     reject_confidence: float = REJECT_CONFIDENCE,
 ) -> Quote:
-    """Generate a complete quote from analysis results.
+    """Generate a complete quote from analysis and cost data.
 
     Parameters
     ----------
     analysis : GeometryAnalysis
         Geometry analysis output.
+    material : str
+        Material type (e.g. PLA, PETG, ABS).
+    rush : bool
+        If True, apply 1.5x rush order surcharge.
     estimate : CostEstimate, optional
         Pre-computed cost estimate. If None, one will be generated.
     min_confidence : float
@@ -315,7 +321,7 @@ def generate_quote(
         Complete quote with decision, costs, and reasoning.
     """
     if estimate is None:
-        estimate = estimate_cost(analysis)
+        estimate = estimate_cost(analysis, material=material, rush=rush)
 
     # --- Determine decision ---
     confidence = analysis.structural_confidence
@@ -345,10 +351,14 @@ def generate_quote(
 
     # --- Line items ---
     bd = estimate.breakdown
+    
+    # Calculate effective filament price for display
+    eff_filament_price = bd.material_cost_usd / analysis.volume_cm3 if analysis.volume_cm3 > 0 else 0.0
+
     line_items = [
         QuoteLineItem(
-            label="PLA Filament",
-            detail=f"{analysis.volume_cm3:.2f} cm³ × ${DEFAULT_FILAMENT_PRICE_PER_CM3}/cm³",
+            label=f"{estimate.context.material_type} Filament",
+            detail=f"{analysis.volume_cm3:.2f} cm³ × ${eff_filament_price:.2f}/cm³",
             cost_usd=bd.material_cost_usd,
             unit=f"{analysis.volume_cm3:.2f} cm³",
         ),
@@ -377,6 +387,15 @@ def generate_quote(
             cost_usd=bd.margin_amount_usd,
         ),
     ]
+    
+    if estimate.context.is_rush_order:
+        line_items.append(
+            QuoteLineItem(
+                label="Rush Order Surcharge",
+                detail="1.5x expedited pricing",
+                cost_usd=bd.rush_surcharge_usd,
+            )
+        )
 
     # --- Build quote ---
     now = datetime.now(timezone.utc)

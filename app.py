@@ -16,6 +16,7 @@ import sys
 import uuid
 import threading
 import traceback
+import requests
 from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
@@ -75,12 +76,29 @@ load_env()
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 executor = ThreadPoolExecutor(max_workers=2)
 
+NEMOCLAW_WEBHOOK_URL = os.environ.get("NEMOCLAW_WEBHOOK_URL", "http://nemoclaw:8788/webhooks/job-review")
+
+def trigger_agent_review(job_id, filename, email):
+    """Notify the NemoClaw Hermes agent about a completed quote analysis."""
+    try:
+        payload = {
+            "job_id": job_id,
+            "filename": filename,
+            "email": email,
+            "event": "job.created"
+        }
+        # Fire POST to NemoClaw's hermes webhook
+        response = requests.post(NEMOCLAW_WEBHOOK_URL, json=payload, timeout=5)
+        print(f"[AGENT WEBHOOK] Notified agent for job {job_id}, status code: {response.status_code}")
+    except Exception as e:
+        print(f"[AGENT WEBHOOK] Warning: failed to notify agent: {e}")
+
 
 # ═══════════════════════════════════════════════════════════════
 # PIPELINE — runs in background thread
 # ═══════════════════════════════════════════════════════════════
 
-def run_pipeline(job_id, stl_path):
+def run_pipeline(job_id, stl_path, material="PLA", rush=False):
     """
     Execute the full analysis pipeline in a background thread.
 
@@ -95,11 +113,11 @@ def run_pipeline(job_id, stl_path):
         print(f"[PIPELINE] {job_id} — analysis complete: confidence={analysis.structural_confidence:.1f}")
 
         # ── Stage 2: Estimate cost ───────────────────────────
-        estimate = estimate_cost(analysis)
+        estimate = estimate_cost(analysis, material=material, rush=rush)
         print(f"[PIPELINE] {job_id} — cost estimated: ${estimate.breakdown.total_usd:.2f}")
 
         # ── Stage 3: Generate quote ──────────────────────────
-        quote = generate_quote(analysis, estimate)
+        quote = generate_quote(analysis, material=material, rush=rush, estimate=estimate)
         quote_dict = quote.to_dict()
         print(f"[PIPELINE] {job_id} — quote generated: {quote.decision.value}")
 
@@ -171,6 +189,11 @@ def run_pipeline(job_id, stl_path):
             line_items_json=json.dumps(line_items),
         )
         print(f"[PIPELINE] {job_id} — complete → {final_status}")
+        
+        # Trigger event-driven agent review webhook in NemoClaw
+        job_details = get_job(job_id)
+        email = job_details.get("email") if job_details else "unknown@email.com"
+        trigger_agent_review(job_id, filename=analysis.filename, email=email)
 
     except Exception as e:
         traceback.print_exc()
@@ -296,8 +319,11 @@ def api_upload():
     # Create DB record
     create_job(job_id, original_name, email, str(stl_path))
 
+    material = request.form.get("material", "PLA")
+    rush = request.form.get("rush", "false").lower() == "true"
+
     # Start pipeline in background using the thread pool executor
-    executor.submit(run_pipeline, job_id, str(stl_path))
+    executor.submit(run_pipeline, job_id, str(stl_path), material, rush)
 
     return jsonify({
         "job_id": job_id,
@@ -496,6 +522,44 @@ def api_status(job_id):
     })
 
 
+@app.route("/api/agent-decide/<job_id>", methods=["POST"])
+def api_agent_decide(job_id):
+    """
+    Agent updates the job decision (and explanation) after review.
+    Synchronizes decision and status.
+    """
+    data = request.get_json() or {}
+    decision = data.get("decision")
+    reasoning = data.get("reasoning", "")
+    
+    if not decision or decision not in ("ACCEPT", "CONDITIONAL", "REJECT"):
+        return jsonify({"error": "Valid decision is required (ACCEPT/CONDITIONAL/REJECT)"}), 400
+        
+    # Sync database status based on decision
+    status = "rejected" if decision == "REJECT" else "quoted"
+    
+    updated = update_job(
+        job_id,
+        decision=decision,
+        nemotron_explanation=reasoning,
+        status=status
+    )
+    if not updated:
+        return jsonify({"error": "Job not found"}), 404
+        
+    print(f"[AGENT CALLBACK] Job {job_id} updated by agent to decision={decision}, status={status}")
+    return jsonify({"status": "ok", "job_id": job_id})
+
+
+@app.route("/api/agent-review/<job_id>", methods=["GET"])
+def agent_review(job_id):
+    """Return job data for agent review."""
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
+
 @app.route("/api/dashboard-data", methods=["GET"])
 def api_dashboard_data():
     """
@@ -521,6 +585,20 @@ def api_dashboard_chat():
     jobs = get_all_jobs()
     response_text = generate_chat_response(message, jobs)
     return jsonify({"response": response_text})
+
+
+@app.route('/api/job/<job_id>/print', methods=['POST'])
+def move_to_print(job_id):
+    """Update job status from paid to printing."""
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+        
+    if job.get("status") != "paid":
+        return jsonify({"error": "Job must be paid before moving to print"}), 400
+        
+    update_job(job_id, status="printing")
+    return jsonify({"status": "printing"})
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -27,11 +27,18 @@
     }
 
     .status-job-id {
-        font-size: 20px;
-        font-weight: 700;
-        color: var(--text-bright);
-        letter-spacing: 1px;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.05);
+        font-size: 32px;
+        font-weight: 800;
+        font-family: 'Courier New', Courier, monospace;
+        color: var(--accent-blue);
+        letter-spacing: 2px;
+        text-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+        margin: 12px 0;
+        padding: 12px 24px;
+        border: 2px dashed var(--accent-blue);
+        display: inline-block;
+        background: rgba(0, 212, 255, 0.05);
+        border-radius: 4px;
     }
 
     /* Timeline Styling */
@@ -340,6 +347,10 @@
             💳 Complete Payment & Start Print
         </a>
 
+        <button id="move-to-print-btn" class="btn btn-cyan" style="width: 100%; display: none;" onclick="moveToPrint()">
+            🖨️ Move to Print
+        </button>
+
         <a href="/" class="btn" style="width: 100%;">
             ← Upload Another Part File
         </a>
@@ -418,6 +429,9 @@
         document.getElementById('alert-printing').style.display = 'none';
         document.getElementById('alert-paid').style.display = 'none';
         document.getElementById('pay-now-btn').style.display = 'none';
+        if (document.getElementById('move-to-print-btn')) {
+            document.getElementById('move-to-print-btn').style.display = 'none';
+        }
 
         // Show appropriate alert message
         if (data.status === 'uploaded') {
@@ -428,6 +442,7 @@
             document.getElementById('pay-now-btn').style.display = 'block';
         } else if (data.status === 'paid') {
             document.getElementById('alert-paid').style.display = 'block';
+            document.getElementById('move-to-print-btn').style.display = 'block';
         } else if (data.status === 'printing') {
             document.getElementById('alert-printing').style.display = 'block';
         } else if (data.status === 'completed') {
@@ -487,6 +502,21 @@
         const percentMap = [0, 20, 40, 60, 80, 100];
         const percent = percentMap[currentIdx] || 0;
         document.getElementById('timeline-progress-bar').style.width = `${percent}%`;
+    }
+
+    function moveToPrint() {
+        if (!confirm("Are you sure you want to move this job to printing?")) return;
+        fetch(`/api/job/${jobId}/print`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'printing') {
+                alert("Job moved to print successfully.");
+                pollStatus();
+            } else {
+                alert("Error: " + data.error);
+            }
+        })
+        .catch(err => alert("Error: " + err));
     }
 
     // Run Polling

@@ -18,12 +18,34 @@ from stl_analyzer import GeometryAnalysis
 # ---------------------------------------------------------------------------
 # Default pricing parameters (USD)
 # ---------------------------------------------------------------------------
-DEFAULT_FILAMENT_PRICE_PER_CM3: float = 0.03       # PLA $0.03/cm³
+MATERIAL_PRICING = {
+    "PLA": 0.03,
+    "ABS": 0.04,
+    "PETG": 0.05,
+    "SLA resin": 0.08,
+}
+DEFAULT_FILAMENT_PRICE_PER_CM3: float = MATERIAL_PRICING["PLA"]
 DEFAULT_MACHINE_RATE_PER_HOUR: float = 4.00          # $4/hr
 DEFAULT_SUPPORT_MATERIAL_PRICE_PER_CM3: float = 0.05 # $0.05/cm³
 DEFAULT_BASE_MARGIN: float = 0.30                    # 30%
 DEFAULT_ESTIMATED_PRINT_SPEED_CM3_PER_HOUR: float = 12.0  # ~12 cm³/hr typical
 SUPPORT_VOLUME_FRACTION: float = 0.15  # assume supports ≈ 15% of overhang volume
+
+
+def recommend_material(analysis: GeometryAnalysis) -> str:
+    """Suggest best material based on geometry."""
+    wt = analysis.wall_thickness
+    # Fine details (< 1mm features) -> SLA resin
+    if wt.min_thickness_mm > 0 and wt.min_thickness_mm < 1.0:
+        return "SLA resin"
+    
+    # High temp resistance needed -> suggest ABS (heuristic based on filename for demo)
+    name = analysis.filename.lower()
+    if any(kw in name for kw in ["engine", "exhaust", "mount", "bracket", "heat"]):
+        return "ABS"
+        
+    # General purpose -> PLA
+    return "PLA"
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +61,7 @@ class CostBreakdown:
     subtotal_usd: float = 0.0
     margin_pct: float = 0.0
     margin_amount_usd: float = 0.0
+    rush_surcharge_usd: float = 0.0
     total_usd: float = 0.0
 
     def to_dict(self) -> dict:
@@ -49,6 +72,7 @@ class CostBreakdown:
             "subtotal_usd": round(self.subtotal_usd, 4),
             "margin_pct": round(self.margin_pct, 2),
             "margin_amount_usd": round(self.margin_amount_usd, 4),
+            "rush_surcharge_usd": round(self.rush_surcharge_usd, 4),
             "total_usd": round(self.total_usd, 4),
         }
 
@@ -57,10 +81,12 @@ class CostBreakdown:
 class EstimateContext:
     """Additional context about the estimate for reporting."""
     estimated_print_time_hours: float = 0.0
-    material_grams_estimated: float = 0.0  # PLA density ~1.24 g/cm³
+    material_grams_estimated: float = 0.0  # density varies by material
     confidence_adjusted_margin: bool = False
     base_margin_pct: float = DEFAULT_BASE_MARGIN
     confidence: float = 100.0
+    material_type: str = "PLA"
+    is_rush_order: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -82,13 +108,16 @@ class CostEstimate:
                 "confidence_adjusted_margin": self.context.confidence_adjusted_margin,
                 "base_margin_pct": round(self.context.base_margin_pct, 2),
                 "confidence": round(self.context.confidence, 1),
+                "material_type": self.context.material_type,
+                "is_rush_order": self.context.is_rush_order,
             },
         }
 
 
 def estimate_cost(
     analysis: GeometryAnalysis,
-    filament_price_cm3: float = DEFAULT_FILAMENT_PRICE_PER_CM3,
+    material: str = "PLA",
+    rush: bool = False,
     machine_rate_hr: float = DEFAULT_MACHINE_RATE_PER_HOUR,
     support_price_cm3: float = DEFAULT_SUPPORT_MATERIAL_PRICE_PER_CM3,
     base_margin: float = DEFAULT_BASE_MARGIN,
@@ -100,8 +129,10 @@ def estimate_cost(
     ----------
     analysis : GeometryAnalysis
         Output from ``stl_analyzer.analyze_stl``.
-    filament_price_cm3 : float
-        Filament cost per cm³ in USD.
+    material : str
+        Material type (e.g. PLA, PETG, ABS).
+    rush : bool
+        If True, apply 1.5x rush order surcharge.
     machine_rate_hr : float
         Machine operating cost per hour in USD.
     support_price_cm3 : float
@@ -120,7 +151,13 @@ def estimate_cost(
     overhang_pct = analysis.overhang.overhang_percentage / 100.0
 
     # --- Material cost ---
-    material_cost = volume_cm3 * filament_price_cm3
+    filament_price_cm3 = MATERIAL_PRICING.get(material, MATERIAL_PRICING["PLA"])
+    
+    # Overhang support cost: for every 10% overhang beyond 45° (which overhang_percentage measures), add 5% to material cost
+    overhang_material_surcharge = int(analysis.overhang.overhang_percentage // 10) * 0.05
+    effective_filament_price_cm3 = filament_price_cm3 * (1.0 + overhang_material_surcharge)
+
+    material_cost = volume_cm3 * effective_filament_price_cm3
 
     # --- Machine time cost ---
     # Estimate print time from volume and print speed
@@ -157,11 +194,19 @@ def estimate_cost(
     adjusted_margin = min(adjusted_margin, 0.80)  # cap at 80%
 
     margin_amount = subtotal * adjusted_margin
-    total = subtotal + margin_amount
+    pre_rush_total = subtotal + margin_amount
+    
+    # --- Rush Order Surcharge ---
+    rush_surcharge = 0.0
+    if rush:
+        rush_surcharge = pre_rush_total * 0.5  # 1.5x total
+        
+    total = pre_rush_total + rush_surcharge
 
-    # --- PLA density estimate ---
-    PLA_DENSITY_G_CM3 = 1.24
-    material_grams = volume_cm3 * PLA_DENSITY_G_CM3
+    # --- Density estimate ---
+    density_map = {"PLA": 1.24, "PETG": 1.27, "ABS": 1.04, "SLA resin": 1.15}
+    density_g_cm3 = density_map.get(material, 1.24)
+    material_grams = volume_cm3 * density_g_cm3
 
     breakdown = CostBreakdown(
         material_cost_usd=material_cost,
@@ -170,6 +215,7 @@ def estimate_cost(
         subtotal_usd=subtotal,
         margin_pct=adjusted_margin * 100.0,
         margin_amount_usd=margin_amount,
+        rush_surcharge_usd=rush_surcharge,
         total_usd=total,
     )
 
@@ -179,6 +225,8 @@ def estimate_cost(
         confidence_adjusted_margin=confidence_adjusted,
         base_margin_pct=base_margin * 100.0,
         confidence=confidence,
+        material_type=material,
+        is_rush_order=rush,
     )
 
     return CostEstimate(breakdown=breakdown, context=context)

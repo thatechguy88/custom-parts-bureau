@@ -32,7 +32,10 @@ except ImportError:
 IN_SANDBOX = os.path.exists("/sandbox/.hermes")
 INFERENCE_URL = os.getenv("NEMOCLAW_INFERENCE_BASE_URL", "https://inference.local/v1")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1"
+# Hermes internal API — always reachable from cpb-app via container network
+HERMES_API_URL = os.getenv("HERMES_API_URL", "http://172.19.0.2:8642/v1")
 MODEL = "nvidia/nemotron-3-ultra-550b-a55b"  # The big one for reasoning
+HERMES_MODEL = "hermes-agent"  # Used when routing through Hermes proxy
 
 
 def load_env():
@@ -48,24 +51,28 @@ def load_env():
 
 
 def get_api_config() -> tuple[str, str, str]:
-    """Get API URL, key, and model based on environment."""
+    """Get API URL, auth header, and model.
+
+    Priority:
+      1. HERMES_API_URL env var (Hermes proxy — always reachable in sandbox network)
+      2. NVIDIA_API_KEY env var (direct NVIDIA API — blocked in sandbox egress)
+      3. inference.local fallback (NemoClaw internal, unreliable)
+    """
     load_env()
-    
-    if IN_SANDBOX:
-        # Inside NemoClaw: try NVIDIA API directly (inference.local doesn't resolve via Python requests)
-        api_key = os.getenv("NVIDIA_API_KEY", "")
-        if api_key:
-            return NVIDIA_API_URL, f"Bearer {api_key}", MODEL
-        # Fallback to inference proxy
-        return INFERENCE_URL, "Bearer dummy", MODEL
-    else:
-        # Outside sandbox: use NVIDIA API directly
-        api_key = os.getenv("NVIDIA_API_KEY", "")
-        if not api_key:
-            raise ValueError(
-                "NVIDIA_API_KEY not set. Get one from https://build.nvidia.com"
-            )
+
+    # Prefer Hermes proxy — reachable from cpb-app on the container network.
+    # Hermes forwards to the configured Nemotron model internally.
+    hermes_url = os.getenv("HERMES_API_URL", HERMES_API_URL)
+    if hermes_url:
+        return hermes_url, "Bearer hermes", HERMES_MODEL
+
+    # Direct NVIDIA API (blocked by sandbox egress proxy, kept as fallback)
+    api_key = os.getenv("NVIDIA_API_KEY", "")
+    if api_key:
         return NVIDIA_API_URL, f"Bearer {api_key}", MODEL
+
+    # Last resort: inference.local proxy
+    return INFERENCE_URL, "Bearer dummy", MODEL
 
 
 SYSTEM_PROMPT = """You are an expert 3D printing engineer at The Custom Parts Bureau.
@@ -158,7 +165,7 @@ def generate_reasoning(quote) -> dict:
             f"{api_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=15,
+            timeout=90,
         )
         response.raise_for_status()
         data = response.json()
@@ -251,6 +258,7 @@ def generate_chat_response(query: str, jobs: list[dict]) -> str:
         jobs_summary = "\n".join(summary_lines) if summary_lines else "No jobs in the database currently."
         
         api_url, api_key, model = get_api_config()
+        print(f"[CHAT AGENT] Routing to {api_url} model={model}")
         
         headers = {
             "Authorization": api_key,
@@ -271,7 +279,7 @@ def generate_chat_response(query: str, jobs: list[dict]) -> str:
             f"{api_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=10,
+            timeout=90,
         )
         response.raise_for_status()
         data = response.json()
@@ -279,31 +287,85 @@ def generate_chat_response(query: str, jobs: list[dict]) -> str:
         
     except Exception as e:
         print(f"[CHAT AGENT] Error calling Nemotron: {e}")
-        # Fallback to local response matching
+        # Structured fallback — answers real questions from the live DB
         query_lower = query.lower()
+
+        # --- Job listing / overview ---
+        if any(kw in query_lower for kw in ("list", "all jobs", "which", "what jobs", "show")):
+            if not jobs:
+                return "No jobs in the database yet."
+            lines = [f"{len(jobs)} job(s) in the system:"]
+            for j in jobs:
+                lines.append(
+                    f"  \u2022 {j.get('id') or '?'} | {j.get('filename') or '?'} | {j.get('status') or '?'} | "
+                    f"{j.get('decision') or 'N/A'} | ${j.get('total_usd') or 0.0:.2f} | "
+                    f"confidence {j.get('confidence') or 0.0:.0f}%"
+                )
+            return "\n".join(lines)
+
+        # --- Revenue ---
+        if "revenue" in query_lower:
+            paid = [j for j in jobs if j.get("status") in ("completed", "printing", "paid")]
+            revenue = sum(j.get("total_usd", 0.0) or 0.0 for j in paid)
+            return f"Revenue from {len(paid)} paid/active job(s): ${revenue:.2f}."
+
+        # --- Margin ---
+        if "margin" in query_lower:
+            paid = [j for j in jobs if j.get("status") in ("completed", "printing", "paid")]
+            margins = [j.get("margin_pct") or 0.0 for j in paid if (j.get("margin_pct") or 0) > 0]
+            avg = sum(margins) / len(margins) if margins else 0.0
+            lines = [f"Average margin: {avg:.1f}% across {len(margins)} job(s)."]
+            for j in paid:
+                lines.append(f"  \u2022 {j.get('filename') or '?'}: {j.get('margin_pct') or 0.0:.1f}%")
+            return "\n".join(lines)
+
+        # --- Queue / next to print ---
+        if any(kw in query_lower for kw in ("queue", "next", "pending")):
+            quoted = [j for j in jobs if j.get("status") == "quoted"]
+            if not quoted:
+                return "No jobs currently waiting in the quoted queue."
+            j = quoted[0]
+            return (
+                f"Next in queue: {j.get('id') or '?'} ({j.get('filename') or '?'}) — "
+                f"${j.get('total_usd') or 0.0:.2f}, decision {j.get('decision') or 'N/A'}, "
+                f"confidence {j.get('confidence') or 0.0:.0f}%."
+            )
+
+        # --- Rejected jobs ---
+        if "reject" in query_lower:
+            rejected = [j for j in jobs if j.get("decision") == "REJECT" or j.get("status") == "rejected"]
+            if not rejected:
+                return "No rejected jobs in the database."
+            lines = [f"{len(rejected)} rejected job(s):"]
+            for j in rejected:
+                reason = (j.get("reasoning_text") or "")[:120]
+                lines.append(f"  • {j.get('id')} ({j.get('filename')}): {reason}")
+            return "\n".join(lines)
+
+        # --- Help ---
         if "help" in query_lower:
-            return "Available queries: next to print, margin today, revenue, status, queue, rejected, or ask about any job filename."
-        elif "revenue" in query_lower:
-            completed_jobs = [j for j in jobs if j.get("status") in ('completed', 'printing', 'paid')]
-            revenue = sum(j.get("total_usd", 0.0) or 0.0 for j in completed_jobs)
-            return f"Revenue today from paid/active jobs is ${revenue:.2f}."
-        elif "margin" in query_lower:
-            completed_jobs = [j for j in jobs if j.get("status") in ('completed', 'printing', 'paid')]
-            margins = [j.get("margin_pct", 0.0) or 0.0 for j in completed_jobs if (j.get("margin_pct") or 0) > 0]
-            avg_margin = sum(margins)/len(margins) if margins else 0.0
-            return f"Average margin is {avg_margin:.1f}% across {len(margins)} jobs."
-        
-        # Look for matching filename
+            return "Ask about: list jobs, revenue, margin, queue / next, rejected, or a specific filename."
+
+        # --- Filename match ---
         for j in jobs:
             fn = j.get("filename", "").replace(".stl", "").lower()
             if fn and fn in query_lower:
                 return (
-                    f"Job {j.get('id')} ({j.get('filename')}): Status={j.get('status')}, "
-                    f"Decision={j.get('decision')}, Total=${j.get('total_usd', 0.0):.2f}, "
-                    f"Confidence={j.get('confidence') if j.get('confidence') else 0.0:.1f}%, "
-                    f"Min Wall={j.get('min_wall_mm')}mm, Overhang={j.get('overhang_pct')}%."
+                    f"{j.get('id') or '?'} ({j.get('filename') or '?'}): status={j.get('status') or '?'}, "
+                    f"decision={j.get('decision') or 'N/A'}, total=${j.get('total_usd') or 0.0:.2f}, "
+                    f"confidence={j.get('confidence') or 0.0:.0f}%, "
+                    f"min wall={j.get('min_wall_mm') or 0.0:.2f}mm, overhang={j.get('overhang_pct') or 0.0:.1f}%."
                 )
-        return f"Database active. Connection to Nemotron 3 Ultra timed out. [System Fallback] Ask about next, margin, revenue, or specific file name."
+
+        # Generic overview when nothing matched
+        lines = [f"[Fallback] {len(jobs)} job(s) on record. Quick summary:"]
+        for j in jobs:
+            lines.append(
+                f"  \u2022 {j.get('id') or '?'} | {j.get('filename') or '?'} | {j.get('status') or '?'} | "
+                f"{j.get('decision') or 'N/A'} | ${j.get('total_usd') or 0.0:.2f}"
+            )
+        lines.append("Try asking: list jobs, margin, revenue, queue, or a filename.")
+        return "\n".join(lines)
 
 
 # --- CLI Demo ---
