@@ -68,33 +68,23 @@ def get_api_config() -> tuple[str, str, str]:
         return NVIDIA_API_URL, f"Bearer {api_key}", MODEL
 
 
-SYSTEM_PROMPT = """You are a professional 3D printing engineer at The Custom Parts Bureau.
+SYSTEM_PROMPT = """You are an expert 3D printing engineer at The Custom Parts Bureau.
+You analyze technical 3D print data and provide a detailed analysis response in JSON format.
 
-Your role is to analyze technical 3D print data and provide clear, professional explanations for customers. You should:
+JSON schema to follow:
+{
+  "explanation": "Under 150 words professional explanation for the customer. If rejecting, state the specific physical metrics violating limits. If conditional, mention structural risks. If accepted, note print suitability.",
+  "decision_override": "ACCEPT", "CONDITIONAL", or "REJECT". You can override the recommended decision to a safer state (e.g. ACCEPT -> CONDITIONAL, or CONDITIONAL -> REJECT) if you see significant structural risk from the metrics. Otherwise, match the recommended decision.",
+  "margin_surcharge_pct": 0.0,
+  "suggested_repairs": "Suggest concrete steps the customer can take to repair the geometry if rejected or conditional. Or empty string if accepted."
+}
 
-1. Translate technical metrics into plain language
-2. Be specific about risks and why they matter
-3. Offer practical solutions when possible
-4. Be honest — if something is unprintable, say so clearly
-5. Keep explanations under 200 words
+Respond ONLY with the raw JSON block. Do not include markdown formatting or commentary outside the JSON."""
 
-Tone: Professional but approachable. Like a trusted engineer explaining to a client."""
+USER_PROMPT_TEMPLATE = """Analyze this technical analysis context:
 
-USER_PROMPT_TEMPLATE = """Analyze this 3D print quote and provide a professional explanation for the customer.
-
-DECISION: {decision}
-The model has been {decision_lower}.
-
-TECHNICAL ANALYSIS:
-{reasoning_text}
-
-COST ESTIMATE:
-- Material: ${material:.2f}
-- Machine time: ${machine:.2f} (est. {hours:.1f} hours)
-- Support material: ${support:.2f}
-- Total: ${total:.2f}
-
-MODEL METRICS:
+RECOMMENDED DECISION: {decision}
+PHYSICAL DATA:
 - Volume: {volume:.2f} cm³ ({weight:.1f}g PLA)
 - Bounding box: {bbox}
 - Triangles: {triangles}
@@ -102,11 +92,10 @@ MODEL METRICS:
 - Min wall thickness: {min_wall:.3f} mm (tolerance: {tolerance:.1f} mm)
 - Structural confidence: {confidence:.1f}/100
 
-Write a clear, professional explanation for the customer.
-If rejecting, explain specifically what's wrong and why it can't be printed.
-If conditionally accepting, explain the risks and what the customer should know.
-If accepting, highlight what makes this a good print.
-Keep it under 200 words."""
+RULE REASONING:
+{reasoning_text}
+
+Analyze the structural validity and return the JSON object."""
 
 
 def generate_reasoning(quote) -> dict:
@@ -117,7 +106,7 @@ def generate_reasoning(quote) -> dict:
         quote: Quote dataclass or dict from quote_generator with analysis data
     
     Returns:
-        dict with "explanation" (str), "model" (str), "usage" (dict)
+        dict with keys: explanation, decision_override, margin_surcharge_pct, suggested_repairs, model, usage, success
     """
     # Convert dataclass to dict if needed
     if hasattr(quote, "to_dict"):
@@ -133,18 +122,11 @@ def generate_reasoning(quote) -> dict:
     # Build the user prompt
     wall = analysis.get("wall_thickness", {})
     overhang = analysis.get("overhang", {})
-    integrity = analysis.get("integrity", {})
     bbox = analysis.get("bounding_box_mm", {})
     
     user_prompt = USER_PROMPT_TEMPLATE.format(
         decision=quote.get("decision", "UNKNOWN"),
-        decision_lower=quote.get("decision", "unknown").lower(),
         reasoning_text=reasoning_text,
-        material=line_items.get("PLA Filament", 0),
-        machine=line_items.get("Machine Time", 0),
-        hours=analysis.get("machine_hours", 0),
-        support=line_items.get("Support Material", 0),
-        total=quote.get("total_usd", 0),
         volume=analysis.get("volume_cm3", 0),
         weight=analysis.get("volume_cm3", 0) * 1.24,  # PLA density ~1.24 g/cm³
         bbox=f"{bbox.get('x', 0)} × {bbox.get('y', 0)} × {bbox.get('z', 0)} mm",
@@ -167,7 +149,7 @@ def generate_reasoning(quote) -> dict:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.3,
+        "temperature": 0.2,
         "max_tokens": 500,
     }
     
@@ -181,11 +163,34 @@ def generate_reasoning(quote) -> dict:
         response.raise_for_status()
         data = response.json()
         
-        explanation = data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"].strip()
+        
+        # Clean markdown wrappers if present
+        if content.startswith("```"):
+            lines = content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+            
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            parsed = {
+                "explanation": content,
+                "decision_override": quote.get("decision", "ACCEPT"),
+                "margin_surcharge_pct": 0.0,
+                "suggested_repairs": ""
+            }
+            
         usage = data.get("usage", {})
         
         return {
-            "explanation": explanation,
+            "explanation": parsed.get("explanation", ""),
+            "decision_override": parsed.get("decision_override", quote.get("decision", "ACCEPT")),
+            "margin_surcharge_pct": float(parsed.get("margin_surcharge_pct", 0.0) or 0.0),
+            "suggested_repairs": parsed.get("suggested_repairs", ""),
             "model": model,
             "usage": usage,
             "success": True,
@@ -194,11 +199,111 @@ def generate_reasoning(quote) -> dict:
     except requests.exceptions.RequestException as e:
         return {
             "explanation": f"[Nemotron API error: {e}]",
+            "decision_override": quote.get("decision", "ACCEPT"),
+            "margin_surcharge_pct": 0.0,
+            "suggested_repairs": "",
             "model": model,
             "usage": {},
             "success": False,
             "error": str(e),
         }
+
+
+CHAT_SYSTEM_PROMPT = """You are a professional assistant and business administrator for The Custom Parts Bureau.
+You have access to the real-time jobs database of the 3D printing bureau.
+Your task is to answer operator questions about the queue, active jobs, financial metrics (revenue, margins), materials, and structural reasons for any rejections.
+
+Analyze the jobs database context carefully and respond to the query.
+Be concise (under 100 words), technical, and direct. Do not decorate responses, keep it direct. Do not hallucinate data that is not in the context.
+If a job was rejected, reference the physical reason (min wall thickness, watertight status, or overhang percentage) from the analysis details.
+
+Current jobs data in the system:
+{jobs_summary}
+"""
+
+def generate_chat_response(query: str, jobs: list[dict]) -> str:
+    """
+    Generate a dynamic operator assistant response using Nemotron 3 Ultra.
+    """
+    try:
+        # Formulate jobs summary
+        summary_lines = []
+        for j in jobs:
+            status = j.get("status", "unknown")
+            decision = j.get("decision", "N/A")
+            total = j.get("total_usd", 0.0) or 0.0
+            margin_pct = j.get("margin_pct", 0.0) or 0.0
+            filename = j.get("filename", "unknown")
+            confidence = j.get("confidence", 0.0) or 0.0
+            min_wall = j.get("min_wall_mm", 0.0) or 0.0
+            overhang = j.get("overhang_pct", 0.0) or 0.0
+            reasoning = j.get("nemotron_explanation") or j.get("reasoning_text") or ""
+            
+            line = (
+                f"- Job {j.get('id')}: {filename} | Status: {status} | Decision: {decision} "
+                f"| Price: ${total:.2f} | Margin: {margin_pct:.1f}% | Confidence: {confidence:.1f}% "
+                f"| Min Wall: {min_wall:.2f}mm | Overhang: {overhang:.1f}%"
+            )
+            if reasoning:
+                line += f" | Reasoning: {reasoning[:120]}..."
+            summary_lines.append(line)
+            
+        jobs_summary = "\n".join(summary_lines) if summary_lines else "No jobs in the database currently."
+        
+        api_url, api_key, model = get_api_config()
+        
+        headers = {
+            "Authorization": api_key,
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT.format(jobs_summary=jobs_summary)},
+                {"role": "user", "content": query},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 300,
+        }
+        
+        response = requests.post(
+            f"{api_url}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+        
+    except Exception as e:
+        print(f"[CHAT AGENT] Error calling Nemotron: {e}")
+        # Fallback to local response matching
+        query_lower = query.lower()
+        if "help" in query_lower:
+            return "Available queries: next to print, margin today, revenue, status, queue, rejected, or ask about any job filename."
+        elif "revenue" in query_lower:
+            completed_jobs = [j for j in jobs if j.get("status") in ('completed', 'printing', 'paid')]
+            revenue = sum(j.get("total_usd", 0.0) or 0.0 for j in completed_jobs)
+            return f"Revenue today from paid/active jobs is ${revenue:.2f}."
+        elif "margin" in query_lower:
+            completed_jobs = [j for j in jobs if j.get("status") in ('completed', 'printing', 'paid')]
+            margins = [j.get("margin_pct", 0.0) or 0.0 for j in completed_jobs if (j.get("margin_pct") or 0) > 0]
+            avg_margin = sum(margins)/len(margins) if margins else 0.0
+            return f"Average margin is {avg_margin:.1f}% across {len(margins)} jobs."
+        
+        # Look for matching filename
+        for j in jobs:
+            fn = j.get("filename", "").replace(".stl", "").lower()
+            if fn and fn in query_lower:
+                return (
+                    f"Job {j.get('id')} ({j.get('filename')}): Status={j.get('status')}, "
+                    f"Decision={j.get('decision')}, Total=${j.get('total_usd', 0.0):.2f}, "
+                    f"Confidence={j.get('confidence') if j.get('confidence') else 0.0:.1f}%, "
+                    f"Min Wall={j.get('min_wall_mm')}mm, Overhang={j.get('overhang_pct')}%."
+                )
+        return f"Database active. Connection to Nemotron 3 Ultra timed out. [System Fallback] Ask about next, margin, revenue, or specific file name."
 
 
 # --- CLI Demo ---

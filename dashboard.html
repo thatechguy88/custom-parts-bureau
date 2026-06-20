@@ -1635,38 +1635,40 @@ function initChat() {
 
   // Initial messages
   addChatMessage('system', 'Hermes Agent console initialized. Nemotron 3 Ultra online.');
-  addChatMessage('system', 'Type "help" for available queries.');
+  addChatMessage('system', 'Ask any question about active jobs, margins, or queue status.');
 
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter' && input.value.trim()) {
-      const query = input.value.trim().toLowerCase();
-      addChatMessage('user', input.value.trim());
+      const userText = input.value.trim();
+      addChatMessage('user', userText);
       input.value = '';
 
-      // Find best matching response
-      setTimeout(() => {
-        let response = null;
-        for (const [key, val] of Object.entries(chatResponses)) {
-          if (query.includes(key)) {
-            response = val;
-            break;
-          }
-        }
+      // Create a temporary "Thinking..." message
+      const thinkingDiv = document.createElement('div');
+      thinkingDiv.className = 'chat-msg agent';
+      thinkingDiv.style.opacity = '0.5';
+      thinkingDiv.style.fontStyle = 'italic';
+      thinkingDiv.textContent = 'Consulting Nemotron 3 Ultra...';
+      messages.appendChild(thinkingDiv);
+      messages.scrollTop = messages.scrollHeight;
 
-        // Check if asking about a specific job
-        if (!response) {
-          const matchedJob = jobs.find(j => query.includes(j.filename.replace('.stl', '').toLowerCase()));
-          if (matchedJob) {
-            response = `${matchedJob.filename} — ${matchedJob.decision}\nConfidence: ${matchedJob.confidence}/100 | Total: $${matchedJob.total_usd.toFixed(2)}\nStatus: ${matchedJob.status} | Margin: ${matchedJob.margin_pct}%\nBounding box: ${matchedJob.bounding_box} mm | Wall: ${matchedJob.min_wall_mm}mm`;
-          }
-        }
-
-        if (!response) {
-          response = 'Query not recognized. Type "help" to see available commands.';
-        }
-
-        addChatMessage('agent', response);
-      }, 300 + Math.random() * 400);
+      try {
+        const response = await fetch('/api/dashboard-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: userText })
+        });
+        if (!response.ok) throw new Error('Network error');
+        const data = await response.json();
+        
+        // Remove thinking message
+        thinkingDiv.remove();
+        addChatMessage('agent', data.response || 'No response generated.');
+      } catch (err) {
+        thinkingDiv.style.opacity = '1';
+        thinkingDiv.style.color = '#ff4444';
+        thinkingDiv.textContent = 'Connection error. Unable to reach Nemotron agent.';
+      }
     }
   });
 }

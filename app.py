@@ -18,6 +18,7 @@ import threading
 import traceback
 from pathlib import Path
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import (
     Flask,
@@ -38,7 +39,7 @@ from adapters import (
 from stl_analyzer import analyze_stl
 from cost_estimator import estimate_cost
 from quote_generator import generate_quote, Decision
-from nemotron_reasoning import generate_reasoning
+from nemotron_reasoning import generate_reasoning, generate_chat_response
 
 # Stripe — import but don't fail if not installed yet
 try:
@@ -72,6 +73,7 @@ def load_env():
 load_env()
 
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+executor = ThreadPoolExecutor(max_workers=2)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -113,15 +115,44 @@ def run_pipeline(job_id, stl_path):
         except Exception as e:
             print(f"[PIPELINE] {job_id} — Nemotron error: {e}, using built-in reasoning")
 
-        # ── Stage 5: Determine status ────────────────────────
-        final_status = "rejected" if quote.decision == Decision.REJECT else "quoted"
+        # ── Stage 5: Determine status & overrides ────────────
+        final_decision = quote.decision.value
+        total_usd = estimate.breakdown.total_usd
+        margin_usd = estimate.breakdown.margin_amount_usd
+        margin_pct = estimate.breakdown.margin_pct
+        line_items = quote_dict.get("line_items", [])
+        
+        if nemotron_result.get("success"):
+            # Check decision override
+            override = nemotron_result.get("decision_override")
+            if override in ("ACCEPT", "CONDITIONAL", "REJECT"):
+                final_decision = override
+                print(f"[PIPELINE] {job_id} — Nemotron decision override: {quote.decision.value} -> {override}")
+            
+            # Apply surcharge if suggested
+            surcharge_pct = nemotron_result.get("margin_surcharge_pct", 0.0)
+            if surcharge_pct > 0.0:
+                print(f"[PIPELINE] {job_id} — Applying Nemotron risk surcharge: +{surcharge_pct}%")
+                surcharge_amount = estimate.breakdown.subtotal_usd * (surcharge_pct / 100.0)
+                margin_usd += surcharge_amount
+                margin_pct += surcharge_pct
+                total_usd += surcharge_amount
+                
+                # Patch line items list to reflect dynamic surcharge changes
+                for item in line_items:
+                    if item.get("label", "").startswith("Margin"):
+                        item["label"] = f"Margin ({margin_pct:.0f}%)"
+                        item["cost_usd"] = margin_usd
+                        item["detail"] = "Confidence-adjusted risk margin + AI surcharge"
+        
+        final_status = "rejected" if final_decision == "REJECT" else "quoted"
 
         # ── Stage 6: Persist to DB ───────────────────────────
         bb = analysis.bounding_box
         update_job(
             job_id,
             status=final_status,
-            decision=quote.decision.value,
+            decision=final_decision,
             confidence=analysis.structural_confidence,
             volume_cm3=analysis.volume_cm3,
             surface_area_cm2=analysis.surface_area_cm2,
@@ -132,12 +163,12 @@ def run_pipeline(job_id, stl_path):
             material_usd=estimate.breakdown.material_cost_usd,
             machine_usd=estimate.breakdown.machine_cost_usd,
             support_usd=estimate.breakdown.support_cost_usd,
-            margin_usd=estimate.breakdown.margin_amount_usd,
-            margin_pct=estimate.breakdown.margin_pct,
-            total_usd=estimate.breakdown.total_usd,
+            margin_usd=margin_usd,
+            margin_pct=margin_pct,
+            total_usd=total_usd,
             reasoning_text=quote.reasoning_text,
             nemotron_explanation=nemotron_result.get("explanation", ""),
-            line_items_json=json.dumps(quote_dict.get("line_items", [])),
+            line_items_json=json.dumps(line_items),
         )
         print(f"[PIPELINE] {job_id} — complete → {final_status}")
 
@@ -240,6 +271,19 @@ def api_upload():
     stl_path = UPLOAD_DIR / safe_name
     file.save(str(stl_path))
 
+    # Fast validation for face complexity (prevent CPU denial-of-service)
+    try:
+        import trimesh
+        temp_mesh = trimesh.load(str(stl_path), force="mesh")
+        if len(temp_mesh.faces) > 150000:
+            stl_path.unlink(missing_ok=True)
+            return jsonify({
+                "error": f"Model complexity exceeds automated limits ({len(temp_mesh.faces):,} triangles found, max 150,000). Please simplify your mesh."
+            }), 400
+    except Exception as e:
+        stl_path.unlink(missing_ok=True)
+        return jsonify({"error": f"Invalid STL file format or corrupted model: {str(e)}"}), 400
+
     # Generate job ID (same format as quote_generator)
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
     name_prefix = Path(original_name).stem[:8].upper().replace(" ", "_")
@@ -252,13 +296,8 @@ def api_upload():
     # Create DB record
     create_job(job_id, original_name, email, str(stl_path))
 
-    # Start pipeline in background
-    thread = threading.Thread(
-        target=run_pipeline,
-        args=(job_id, str(stl_path)),
-        daemon=True,
-    )
-    thread.start()
+    # Start pipeline in background using the thread pool executor
+    executor.submit(run_pipeline, job_id, str(stl_path))
 
     return jsonify({
         "job_id": job_id,
@@ -381,17 +420,27 @@ def api_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
 
     # If we have a webhook secret, verify the signature
-    if STRIPE_WEBHOOK_SECRET and STRIPE_AVAILABLE:
-        import stripe
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, STRIPE_WEBHOOK_SECRET
-            )
-        except (ValueError, stripe.error.SignatureVerificationError) as e:
-            print(f"[WEBHOOK] Signature verification failed: {e}")
-            return jsonify({"error": "Invalid signature"}), 400
+    if STRIPE_AVAILABLE:
+        if STRIPE_WEBHOOK_SECRET:
+            import stripe
+            try:
+                event = stripe.Webhook.construct_event(
+                    payload, sig_header, STRIPE_WEBHOOK_SECRET
+                )
+            except (ValueError, stripe.error.SignatureVerificationError) as e:
+                print(f"[WEBHOOK] Signature verification failed: {e}")
+                return jsonify({"error": "Invalid signature"}), 400
+        else:
+            # Missing webhook secret: only permit unverified payloads in dev debug mode
+            if not app.debug:
+                print("[WEBHOOK] Security violation: STRIPE_WEBHOOK_SECRET is missing in non-debug/production mode.")
+                return jsonify({"error": "Configuration error: Webhook verification required"}), 500
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Invalid JSON"}), 400
     else:
-        # No webhook secret — parse payload directly (dev mode)
+        # Stripe not installed (Mock mode) — parse directly
         try:
             event = json.loads(payload)
         except json.JSONDecodeError:
@@ -456,6 +505,22 @@ def api_dashboard_data():
     jobs = get_all_jobs()
     dashboard_data = jobs_to_dashboard_data(jobs)
     return jsonify(dashboard_data)
+
+
+@app.route("/api/dashboard-chat", methods=["POST"])
+def api_dashboard_chat():
+    """
+    Operator panel live chat assistant.
+    Receives user query, loads jobs from db, and calls Nemotron.
+    """
+    data = request.get_json() or {}
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+        
+    jobs = get_all_jobs()
+    response_text = generate_chat_response(message, jobs)
+    return jsonify({"response": response_text})
 
 
 # ═══════════════════════════════════════════════════════════════
