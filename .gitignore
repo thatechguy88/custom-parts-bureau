@@ -8,4 +8,6 @@ OPUS-CONTEXT.md
 generate_tests.py
 pipeline_test.py
 uploads/
+test_stl/
 *.db
+marketing_pitch.md
