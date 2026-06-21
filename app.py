@@ -31,7 +31,7 @@ from flask import (
 )
 
 # ── Local modules ────────────────────────────────────────────────
-from models import init_db, create_job, update_job, get_job, get_all_jobs
+from models import init_db, create_job, update_job, get_job, get_all_jobs, delete_job
 from adapters import (
     quote_to_stripe_dict,
     inject_machine_hours,
@@ -599,6 +599,15 @@ def move_to_print(job_id):
         
     update_job(job_id, status="printing")
     return jsonify({"status": "printing"})
+
+
+@app.route('/api/job/<job_id>', methods=['DELETE'])
+def api_delete_job(job_id):
+    """Delete a job entirely."""
+    deleted = delete_job(job_id)
+    if not deleted:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({"status": "ok", "message": f"Job {job_id} deleted."})
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -120,8 +120,8 @@ def job_to_dashboard_format(job):
     print_progress = 0
     print_eta = ""
     if status == "printing":
-        print_progress = 47  # default for demo
-        print_eta = "~32 min"
+        print_progress = 0  # starts at 0, dashboard JS will increment it
+        print_eta = "~2 hrs"
     elif status == "completed":
         print_progress = 100
         print_eta = ""

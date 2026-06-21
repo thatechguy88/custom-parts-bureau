@@ -144,6 +144,16 @@ def get_jobs_by_email(email):
     return [_row_to_dict(r) for r in rows]
 
 
+def delete_job(job_id):
+    """Delete a job by ID. Returns True if deleted, False if not found."""
+    conn = _get_conn()
+    cursor = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 if __name__ == "__main__":
     init_db()
     print(f"Database initialized at {DB_PATH}")

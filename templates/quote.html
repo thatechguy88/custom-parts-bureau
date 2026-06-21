@@ -559,6 +559,8 @@
         }
     }
 
+    let isFirstFetch = true;
+    
     // Call API quote endpoint
     function pollJobStatus() {
         fetch(`/api/quote/${jobId}`)
@@ -570,11 +572,19 @@
             apiData = data;
             // If the backend has finished, and we've finished our animations, show the results
             if (data.status !== 'analyzing' && data.status !== 'uploaded') {
-                // If we've completed stage timers, show results immediately
-                if (currentStage === 3 && !loadingStageTimer) {
+                if (isFirstFetch) {
+                    // Job is already done. Fast track to bypass loading timers.
+                    if (loadingStageTimer) {
+                        clearInterval(loadingStageTimer);
+                        loadingStageTimer = null;
+                    }
+                    renderResult(data);
+                } else if (currentStage === 3 && !loadingStageTimer) {
+                    // Normal progression: show results immediately once timers end
                     renderResult(data);
                 }
             }
+            isFirstFetch = false;
         })
         .catch(err => {
             console.error("Polling error: ", err);

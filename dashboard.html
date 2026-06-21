@@ -137,6 +137,19 @@ html, body {
   color: #00d4ff;
   text-transform: uppercase;
 }
+.dashboard-job-id {
+  font-size: 16px;
+  font-weight: 800;
+  font-family: 'Courier New', Courier, monospace;
+  color: #00d4ff;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+  padding: 4px 8px;
+  border: 1px dashed #00d4ff;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 3px;
+  display: inline-block;
+}
 .panel-body {
   flex: 1;
   overflow-y: auto;
@@ -658,9 +671,12 @@ html, body {
 
     <!-- Detail Panel -->
     <div class="panel" id="detail-panel">
-      <div class="panel-header">
+      <div class="panel-header" style="display: flex; align-items: center; justify-content: space-between;">
         <span class="panel-title">Job Detail</span>
-        <span style="font-size:9px;color:#555;" id="detail-job-id"></span>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <button id="delete-job-btn" class="btn" style="display:none; border-color:#ff4444; color:#ff4444; padding: 4px 8px; font-size: 10px; height: auto; min-height: 24px;" onclick="deleteJobFromDashboard()">🗑️ DELETE</button>
+          <span class="dashboard-job-id" id="detail-job-id" style="display:none;"></span>
+        </div>
       </div>
       <div class="panel-body" id="detail-body">
         <div class="detail-empty">
@@ -1278,7 +1294,7 @@ async function fetchData() {
         const data = await response.json();
         
         if (data.jobs && data.jobs.length > 0) {
-            if (data.jobs.length < 5) {
+            if (data.jobs.length < 0) {
                 // Merge real jobs at the beginning of mock jobs, filtering out duplicates by id
                 const realIds = new Set(data.jobs.map(j => j.id));
                 const filteredMockJobs = mockJobs.filter(mj => !realIds.has(mj.id));
@@ -1418,7 +1434,7 @@ function renderKanban() {
   const kanban = document.getElementById('kanban');
   kanban.innerHTML = `
     <div class="kanban-col col-paid">
-      <div class="kanban-col-header">Paid — Ready <span class="count">${columns.paid.length}</span></div>
+      <div class="kanban-col-header">Ready <span class="count">${columns.paid.length}</span></div>
       <div class="kanban-cards">${columns.paid.map(j => renderCard(j)).join('')}</div>
     </div>
     <div class="kanban-col col-printing">
@@ -1447,6 +1463,13 @@ function renderCard(job, isPrinting = false) {
   ` : '';
   const rejectedTag = job.decision === 'REJECTED' ? '<span style="color:#ff4444;font-size:9px;"> ✗ REFUNDED</span>' : '';
 
+  let payIndicator = '';
+  if (job.status === 'paid') {
+      payIndicator = job.payment_status === 'paid' 
+        ? '<span style="color:#00ff41;font-size:9px;border:1px solid #00ff4130;padding:2px 4px;border-radius:2px;">PAID</span>' 
+        : '<span style="color:#ffd700;font-size:9px;border:1px solid #ffd70030;padding:2px 4px;border-radius:2px;">PENDING</span>';
+  }
+
   return `
     <div class="job-card ${selected} ${printingClass}" data-id="${job.id}" onclick="selectJob('${job.id}')">
       <div class="filename">${job.filename}${rejectedTag}</div>
@@ -1454,7 +1477,10 @@ function renderCard(job, isPrinting = false) {
         <span class="amount">${job.total_usd > 0 ? '$' + job.total_usd.toFixed(2) : '—'}</span>
         <span class="confidence-badge ${getConfidenceClass(job.confidence)}">${job.confidence.toFixed(1)}</span>
       </div>
-      <div class="time-ago">${getTimeAgo(job.paid_at || job.created_at)}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+        <div class="time-ago" style="margin-top:0;">${getTimeAgo(job.paid_at || job.created_at)}</div>
+        ${payIndicator}
+      </div>
       ${progress}
     </div>
   `;
@@ -1471,6 +1497,8 @@ function selectJob(jobId) {
   renderKanban(); // re-render to update selection
 
   document.getElementById('detail-job-id').textContent = job.id;
+  document.getElementById('detail-job-id').style.display = 'inline-block';
+  document.getElementById('delete-job-btn').style.display = 'inline-block';
 
   // Decision badge
   const decisionClass = job.decision === 'ACCEPTED' ? 'badge-accepted' :
@@ -1532,46 +1560,100 @@ function selectJob(jobId) {
         </div>
       </div>
 
-      <!-- Cost Breakdown -->
-      <div class="cost-breakdown">
-        <div class="cost-title">Cost Breakdown</div>
-        <div class="cost-chart-row">
-          <div class="donut-container">${donutSVG}</div>
-          <div class="cost-legend">
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#00d4ff"></span>
-              <span class="legend-label">Material</span>
-              <span class="legend-value">$${job.material_usd.toFixed(2)}</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#7c3aed"></span>
-              <span class="legend-label">Machine</span>
-              <span class="legend-value">$${job.machine_usd.toFixed(2)}</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#ffd700"></span>
-              <span class="legend-label">Support</span>
-              <span class="legend-value">$${job.support_usd.toFixed(2)}</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-dot" style="background:#00ff41"></span>
-              <span class="legend-label">Margin</span>
-              <span class="legend-value">$${job.margin_usd.toFixed(2)} <span style="color:#555">(${job.margin_pct.toFixed(1)}%)</span></span>
+      <!-- Cost Breakdown & Reasoning Side-by-Side -->
+      <div style="display: flex; gap: 16px; align-items: stretch;">
+        
+        <!-- Cost Breakdown -->
+        <div class="cost-breakdown" style="flex: 1; margin-bottom: 0;">
+          <div class="cost-title">Cost Breakdown</div>
+          <div class="cost-chart-row">
+            <div class="donut-container">${donutSVG}</div>
+            <div class="cost-legend">
+              <div class="legend-item">
+                <span class="legend-dot" style="background:#00d4ff"></span>
+                <span class="legend-label">Material</span>
+                <span class="legend-value">$${job.material_usd.toFixed(2)}</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background:#7c3aed"></span>
+                <span class="legend-label">Machine</span>
+                <span class="legend-value">$${job.machine_usd.toFixed(2)}</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background:#ffd700"></span>
+                <span class="legend-label">Support</span>
+                <span class="legend-value">$${job.support_usd.toFixed(2)}</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background:#00ff41"></span>
+                <span class="legend-label">Margin</span>
+                <span class="legend-value">$${job.margin_usd.toFixed(2)} <span style="color:#555">(${job.margin_pct.toFixed(1)}%)</span></span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Reasoning -->
-      <div class="reasoning-box">
-        <div class="reasoning-title">
-          <span>Nemotron 3 Ultra Reasoning</span>
-          <span class="blink"></span>
+        <!-- Reasoning -->
+        <div class="reasoning-box" style="flex: 1; margin-bottom: 0;">
+          <div class="reasoning-title">
+            <span>Nemotron 3 Ultra Reasoning</span>
+            <span class="blink"></span>
+          </div>
+          <div class="reasoning-text">${job.reasoning}</div>
         </div>
-        <div class="reasoning-text">${job.reasoning}</div>
+
       </div>
+      
+      ${job.status === 'paid' ? `
+      <div style="margin-top: 16px;">
+        <button class="btn" style="width:100%; border-color:#00d4ff; color:#00d4ff;" onclick="moveToPrintFromDashboard('${job.id}')">
+          🖨️ MOVE TO PRINT
+        </button>
+      </div>
+      ` : ''}
     </div>
   `;
+}
+
+function moveToPrintFromDashboard(jobId) {
+    if (!confirm("Are you sure you want to move this job to printing?")) return;
+    fetch(`/api/job/${jobId}/print`, { method: 'POST' })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'printing') {
+            fetchData(); // Refresh dashboard data immediately
+        } else {
+            alert("Error: " + data.error);
+        }
+    })
+    .catch(err => alert("Error: " + err));
+}
+
+function deleteJobFromDashboard() {
+    if (!selectedJobId) return;
+    if (!confirm("Are you sure you want to completely delete this job? This action cannot be undone.")) return;
+    
+    fetch(`/api/job/${selectedJobId}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            // Clear detail panel
+            selectedJobId = null;
+            lastRenderedJobState = null;
+            document.getElementById('detail-job-id').style.display = 'none';
+            document.getElementById('delete-job-btn').style.display = 'none';
+            document.getElementById('detail-body').innerHTML = `
+                <div class="detail-empty">
+                  <div class="icon">⬡</div>
+                  <div class="text">Select a job to inspect</div>
+                </div>
+            `;
+            fetchData(); // Refresh dashboard
+        } else {
+            alert("Error: " + data.error);
+        }
+    })
+    .catch(err => alert("Error: " + err));
 }
 
 function renderDonut(job) {

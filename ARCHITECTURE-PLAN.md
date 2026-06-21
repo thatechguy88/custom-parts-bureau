@@ -17,8 +17,8 @@ A 3D printing business run by an AI agent. Customers upload STL files through a 
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│              APP CONTAINER (Docker)                      │
-│         Flask app on port 5001                           │
+│              FLASK APP (Local/Docker)                    │
+│         Flask app running on port 5001                   │
 │                                                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │
 │  │ Web UI      │  │ REST API    │  │ SQLite DB       │ │
@@ -27,22 +27,32 @@ A 3D printing business run by an AI agent. Customers upload STL files through a 
 │                          │                               │
 │  ┌───────────────────────▼─────────────────────────┐   │
 │  │ Webhook Trigger                                 │   │
-│  │ On job.created → POST to Hermes webhook         │   │
+│  │ On job.created → POST to NemoClaw Tunnel URL    │   │
 │  └─────────────────────────────────────────────────┘   │
 └──────────────────────┬──────────────────────────────────┘
-                       │ HTTP (Docker network)
+                       │ 
 ┌──────────────────────▼──────────────────────────────────┐
-│              NEMOCLAW CONTAINER                          │
-│         Hermes Agent + Nemotron 3 Ultra                  │
+│              PUBLIC INTERNET TUNNELS                     │
+│  Flask App exposed via Cloudflared Quick Tunnel          │
+│  (e.g., https://app.trycloudflare.com)                   │
+│                                                          │
+│  NemoClaw exposed via `nemoclaw tunnel start`            │
+│  (e.g., https://nemoclaw.trycloudflare.com)              │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│              NEMOCLAW SANDBOX                            │
+│         Hermes Agent + Managed Inference (local)         │
 │                                                          │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ Webhook: /webhooks/job-review                   │   │
-│  │ Prompt: "New job {job_id}: {filename}..."       │   │
-│  │                                                  │   │
-│  │ Agent Tools:                                     │   │
-│  │ - curl app API (read jobs, update status)        │   │
-│  │ - SQLite query (review data)                     │   │
-│  │ - Telegram (report to operator)                  │   │
+│  │ Webhook Receiver                                │   │
+│  │ Path: /webhooks/job-review                      │   │
+│  │                                                 │   │
+│  │ Agent Tools & Constraints:                      │   │
+│  │ - curl app API (via Flask's Cloudflare URL)     │   │
+│  │ - Network Egress Policy: whitelist Flask URL    │   │
+│  │ - Filesystem: Read/Write ONLY in `/workspace`   │   │
+│  │ - Telegram (report to operator)                 │   │
 │  └─────────────────────────────────────────────────┘   │
 │                                                          │
 │  Agent Responsibilities:                                 │
@@ -55,19 +65,15 @@ A 3D printing business run by an AI agent. Customers upload STL files through a 
 
 ---
 
-## Docker Setup
+## Networking & Security Setup
 
-### Network
+NemoClaw uses a strict "deny-by-default" egress proxy and blocks local Server-Side Request Forgery (SSRF). To allow the Flask app and the Agent to communicate, we use public tunnels to bypass the local Docker network completely.
 
-```bash
-docker network create cpb-network
-```
-
-### App Container
+### 1. Run the Flask App
 
 ```bash
+# Run the app locally or in Docker, exposed on port 5001
 docker run -d --name cpb-app \
-  --network cpb-network \
   -p 5001:5001 \
   -v ~/custom-parts-bureau:/app \
   -w /app \
@@ -75,17 +81,43 @@ docker run -d --name cpb-app \
   sh -c 'pip install -q flask trimesh numpy scipy stripe requests && python3 app.py'
 ```
 
-**Key:** The app runs on the Docker network. NemoClaw can reach it at `http://cpb-app:5001`.
+### 2. Expose the Flask App (Cloudflared)
 
-### NemoClaw Container (existing)
-
-Already running as `openshell-hackathon01-{uuid}`. Connect it to the network:
+Start a Quick Tunnel to expose the Flask app to the internet.
 
 ```bash
-docker network connect cpb-network openshell-hackathon01-{uuid}
+cloudflared tunnel --url http://localhost:5001
 ```
+*Note the generated public URL (e.g., `https://flask-app.trycloudflare.com`).*
 
-Now NemoClaw can reach the app at `http://cpb-app:5001`.
+### 3. Expose NemoClaw Webhooks (Cloudflared)
+
+Inside NemoClaw, start the inbound tunnel so Hermes can receive webhooks from Flask.
+
+```bash
+nemoclaw tunnel start
+```
+*Note the generated NemoClaw public URL (e.g., `https://nemoclaw-agent.trycloudflare.com`).*
+
+### 4. NemoClaw Network Policy (Egress)
+
+The NemoClaw proxy will block the agent from reaching the Flask app unless whitelisted. 
+1. Run NemoClaw in `monitor-only` mode initially to capture required endpoints.
+2. Create a policy file `cpb-policy.yaml`:
+```yaml
+network_policies:
+  flask_app:
+    name: "CPB Flask App"
+    endpoints:
+      - host: "flask-app.trycloudflare.com" # Replace with your Cloudflare URL
+        port: 443
+        protocol: rest
+        enforcement: enforce
+    rules:
+      - allow: { method: GET, path: "/**" }
+      - allow: { method: POST, path: "/**" }
+```
+3. Apply it to the sandbox: `nemoclaw policy-add --from-file cpb-policy.yaml`
 
 ---
 
@@ -98,14 +130,17 @@ hermes webhook subscribe job-review \
   --prompt "New job uploaded. Job ID: {job_id}. Filename: {filename}. Email: {email}. 
 
 Review this job:
-1. Fetch the job details from http://cpb-app:5001/api/quote/{job_id}
+1. Fetch the job details from https://flask-app.trycloudflare.com/api/quote/{job_id}
 2. Verify the analysis makes sense (check geometry, costs, decision)
 3. If the decision seems wrong, override it and explain why
 4. If everything looks good, confirm it
-5. Update the job status via POST http://cpb-app:5001/api/agent-decide/{job_id}
+5. Update the job status via POST https://flask-app.trycloudflare.com/api/agent-decide/{job_id}
 6. Report your decision to Telegram
 
-Be concise. Focus on whether the decision is justified by the data." \
+CRITICAL INSTRUCTIONS:
+- Be concise. Focus on whether the decision is justified by the data.
+- If you need to write any scripts or temporary files, you MUST use the /workspace directory.
+- Use inference.local for any required Nemotron reasoning." \
   --events "job.created" \
   --deliver telegram \
   --description "Reviews each new quote and validates the AI decision"
@@ -121,10 +156,11 @@ import requests
 def trigger_agent_review(job_id, filename, email):
     """Notify the agent about a new job."""
     try:
+        # POST to NemoClaw's PUBLIC Cloudflare tunnel URL
+        NEMOCLAW_WEBHOOK_URL = "https://nemoclaw-agent.trycloudflare.com/webhooks/job-review"
+        
         requests.post(
-            "http://cpb-app:5001/webhooks/job-review",  # internal
-            # Actually: POST to NemoClaw's hermes webhook
-            "http://nemoclaw:8788/webhooks/job-review",
+            NEMOCLAW_WEBHOOK_URL,
             json={
                 "job_id": job_id,
                 "filename": filename,
@@ -176,118 +212,61 @@ def agent_decide(job_id):
 - Event: `payment.received` (webhook from Flask app)
 - Action: Update status → notify operator "ready to print"
 
-### Agent Prompt (for job review webhook)
-
-```
-You are the Quality Assurance Agent for The Custom Parts Bureau.
-
-A new job has been uploaded. Review it:
-
-1. Fetch job details: curl http://cpb-app:5001/api/quote/{job_id}
-2. Check: Is the decision (ACCEPT/REJECT/CONDITIONAL) justified by the confidence score?
-   - ≥70: should be ACCEPT
-   - 40-69: should be CONDITIONAL
-   - <40: should be REJECT
-3. Check: Are the cost estimates reasonable?
-   - Material: $0.01-$50
-   - Machine: $0.10-$100
-   - Total: $0.50-$200
-4. Check: Does the Nemotron reasoning match the actual geometry data?
-5. If anything looks wrong, override the decision with explanation
-
-Update the job: curl -X POST http://cpb-app:5001/api/agent-decide/{job_id} \
-  -d '{"decision": "...", "reasoning": "..."}'
-
-Report to Telegram: brief summary of what you found.
-```
-
----
-
-## File Structure
-
-```
-custom-parts-bureau/
-├── app.py                    # Flask backend (webhook triggers added)
-├── models.py                 # SQLite models
-├── adapters.py               # Pipeline adapters
-├── stl_analyzer.py           # Geometry analysis
-├── cost_estimator.py         # Cost estimation
-├── quote_generator.py        # Quote generation
-├── nemotron_reasoning.py     # Nemotron 3 Ultra integration
-├── stripe_integration.py     # Stripe checkout
-├── dashboard.html            # P&L dashboard
-├── templates/
-│   ├── base.html
-│   ├── landing.html
-│   ├── quote.html
-│   └── status.html
-├── test_stl/                 # Sample STL files
-├── .env                      # API keys (gitignored)
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
-
 ---
 
 ## Implementation Steps
 
-### Phase 1: Docker Setup
-1. Create Docker network (`cpb-network`)
-2. Run app container with volume mount
-3. Connect NemoClaw to network
-4. Verify connectivity (`curl http://cpb-app:5001/` from NemoClaw)
+### Phase 1: Tunnel Setup & Security
+1. Run app container (exposed on `5001`)
+2. Start Flask app Cloudflared Quick Tunnel
+3. Start NemoClaw inbound tunnel
+4. Apply NemoClaw egress policy (`cpb-policy.yaml`) for the Flask app's tunnel URL
 
 ### Phase 2: Webhook Integration
-1. Add `trigger_agent_review()` to `app.py` (POST to NemoClaw webhook)
+1. Update `trigger_agent_review()` in `app.py` to use NemoClaw's tunnel URL
 2. Add `/api/agent-decide/<job_id>` endpoint
-3. Create webhook subscription in NemoClaw (`hermes webhook subscribe`)
-4. Test: upload STL → verify agent receives webhook → verify agent responds
+3. Create webhook subscription in NemoClaw
+4. Test: upload STL → verify agent receives webhook via tunnel → verify agent reaches Flask app via proxy
 
 ### Phase 3: Agent Configuration
-1. Write agent prompt for job review
-2. Configure health check cron (every 5 min)
+1. Write agent prompt with `/workspace` constraints
+2. Configure health check cron
 3. Test: agent reviews a job → decision updated → Telegram notification sent
-
-### Phase 4: Polish
-1. Dashboard shows agent decisions (QA pass/fail)
-2. Status page shows agent review timestamp
-3. Telegram notifications are clean and informative
 
 ---
 
 ## Testing Checklist
 
 - [ ] App container starts and serves landing page
-- [ ] NemoClaw can reach app at `http://cpb-app:5001`
+- [ ] Cloudflared quick tunnel exposes Flask app
+- [ ] NemoClaw tunnel exposes webhook receiver
+- [ ] Network policy applied and `monitor-only` mode tested
 - [ ] STL upload creates job in database
-- [ ] Webhook fires on job creation
-- [ ] Agent receives webhook and reviews job
+- [ ] Webhook fires on job creation and reaches agent
+- [ ] Agent successfully fetches job details via Flask tunnel URL
 - [ ] Agent decision updates the database
 - [ ] Agent reports to Telegram
 - [ ] Health check cron runs and reports
-- [ ] Dashboard shows real-time status
-- [ ] Stripe checkout works end-to-end
 
 ---
 
 ## Key Commands
 
 ```bash
-# Start everything
-docker network create cpb-network
-docker run -d --name cpb-app --network cpb-network -p 5001:5001 -v ~/custom-parts-bureau:/app -w /app python:3.11-slim sh -c 'pip install -q flask trimesh numpy scipy stripe requests && python3 app.py'
-docker network connect cpb-network openshell-hackathon01-{uuid}
+# Start Flask App and Tunnel
+docker run -d --name cpb-app -p 5001:5001 -v ~/custom-parts-bureau:/app -w /app python:3.11-slim sh -c 'pip install -q flask trimesh numpy scipy stripe requests && python3 app.py'
+cloudflared tunnel --url http://localhost:5001
 
-# Inside NemoClaw — set up webhook
+# Inside NemoClaw — start tunnel and apply policy
+nemoclaw tunnel start
+nemoclaw policy-add --from-file cpb-policy.yaml
+
+# Set up webhook
 hermes webhook subscribe job-review \
-  --prompt "New job: {job_id} ({filename}). Review at http://cpb-app:5001/api/quote/{job_id}. Update at http://cpb-app:5001/api/agent-decide/{job_id}. Report to Telegram." \
+  --prompt "New job: {job_id} ({filename}). Review at https://flask-app.trycloudflare.com/api/quote/{job_id}. Update at https://flask-app.trycloudflare.com/api/agent-decide/{job_id}. Report to Telegram. MUST ONLY USE /workspace DIRECTORY." \
   --events "job.created" \
   --deliver telegram
 
 # Test webhook
 hermes webhook test job-review --payload '{"job_id":"test123","filename":"bracket.stl","email":"test@test.com"}'
-
-# Check agent logs
-hermes logs --follow
 ```
