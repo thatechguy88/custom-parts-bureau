@@ -31,6 +31,7 @@ def init_db():
             filename                TEXT NOT NULL,
             email                   TEXT NOT NULL,
             status                  TEXT NOT NULL DEFAULT 'uploaded',
+            analysis_stage          TEXT NOT NULL DEFAULT 'uploaded',
             decision                TEXT,
             confidence              REAL,
             volume_cm3              REAL,
@@ -51,10 +52,24 @@ def init_db():
             stripe_session_id       TEXT,
             stripe_payment_status   TEXT,
             stl_path                TEXT,
+            agent_decision          TEXT,
+            agent_reasoning         TEXT,
             created_at              TEXT NOT NULL,
             updated_at              TEXT NOT NULL
         )
     """)
+    
+    # Simple migration for existing DBs — add columns if missing
+    for col, default in [
+        ("analysis_stage", "'uploaded'"),
+        ("agent_decision", "NULL"),
+        ("agent_reasoning", "NULL"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT DEFAULT {default}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
     conn.commit()
     conn.close()
 
@@ -115,6 +130,15 @@ def update_job(job_id, **fields):
     return _row_to_dict(row)
 
 
+def update_job_stage(job_id, stage):
+    """Fast update for analysis_stage without returning the full dict."""
+    conn = _get_conn()
+    conn.execute("UPDATE jobs SET analysis_stage = ?, updated_at = ? WHERE id = ?", 
+                 (stage, _now(), job_id))
+    conn.commit()
+    conn.close()
+
+
 def get_job(job_id):
     """Get a single job by ID. Returns dict or None."""
     conn = _get_conn()
@@ -139,6 +163,59 @@ def get_jobs_by_email(email):
     rows = conn.execute(
         "SELECT * FROM jobs WHERE email = ? ORDER BY created_at DESC",
         (email,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_jobs_awaiting_decision():
+    """Find jobs where the agent has written a decision to the shared DB.
+    
+    These are jobs in 'analyzing' state with analysis_stage='reasoning'
+    where the agent has populated agent_decision via the synced DB.
+    """
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT * FROM jobs
+           WHERE status = 'analyzing'
+             AND analysis_stage = 'reasoning'
+             AND agent_decision IS NOT NULL"""
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_stale_jobs(timeout_minutes=5):
+    """Find jobs stuck in 'analyzing' with no agent decision past the timeout.
+    
+    Returns jobs that have completed the pipeline (stage='reasoning')
+    but where the agent has not yet written a decision, and the
+    updated_at timestamp is older than timeout_minutes ago.
+    """
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT * FROM jobs
+           WHERE status = 'analyzing'
+             AND analysis_stage = 'reasoning'
+             AND agent_decision IS NULL
+             AND updated_at < datetime('now', ? || ' minutes')""",
+        (f"-{timeout_minutes}",)
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_midpipeline_jobs():
+    """Find jobs whose pipeline was interrupted (container restart).
+    
+    These are jobs in 'analyzing' state where analysis_stage is NOT
+    'reasoning' — meaning the pipeline thread died before completing.
+    """
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT * FROM jobs
+           WHERE status = 'analyzing'
+             AND analysis_stage != 'reasoning'"""
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]

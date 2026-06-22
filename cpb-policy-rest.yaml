@@ -1,0 +1,16 @@
+preset:
+  name: "cpb-flask-rest"
+network_policies:
+  flask_app_rest:
+    name: "CPB Flask App REST"
+    endpoints:
+      - host: "172.18.0.3"
+        port: 5001
+        protocol: rest
+        rules:
+          - allow:
+              method: POST
+              path: "/api/webhooks/hermes"
+          - allow:
+              method: GET
+              path: "/*"

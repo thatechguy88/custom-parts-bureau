@@ -472,9 +472,11 @@
             return response.json();
         })
         .then(data => {
-            if (data.job_id) {
-                // Redirect to the quote page
-                window.location.href = `/quote/${data.job_id}`;
+            if (data.redirect) {
+                // Redirect immediately to status page with live progress
+                window.location.href = data.redirect;
+            } else if (data.job_id) {
+                window.location.href = `/status/${data.job_id}`;
             } else {
                 throw new Error("No job ID received from manufacturing pipeline");
             }

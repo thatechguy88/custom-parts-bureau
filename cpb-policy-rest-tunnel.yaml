@@ -1,0 +1,16 @@
+preset:
+  name: "cpb-flask-rest-tunnel"
+network_policies:
+  flask_app_rest:
+    name: "CPB Flask App REST"
+    endpoints:
+      - host: "slides-organisations-ellis-programmer.trycloudflare.com"
+        port: 443
+        protocol: rest
+        rules:
+          - allow:
+              method: POST
+              path: "/api/webhooks/hermes"
+          - allow:
+              method: GET
+              path: "/*"

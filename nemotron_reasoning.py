@@ -60,16 +60,15 @@ def get_api_config() -> tuple[str, str, str]:
     """
     load_env()
 
+    # Direct NVIDIA API is best if we are outside the sandbox
+    api_key = os.getenv("NVIDIA_API_KEY", "")
+    if api_key and not IN_SANDBOX:
+        return NVIDIA_API_URL, f"Bearer {api_key}", MODEL
+
     # Prefer Hermes proxy — reachable from cpb-app on the container network.
-    # Hermes forwards to the configured Nemotron model internally.
-    hermes_url = os.getenv("HERMES_API_URL", HERMES_API_URL)
+    hermes_url = os.getenv("HERMES_API_URL", "")
     if hermes_url:
         return hermes_url, "Bearer hermes", HERMES_MODEL
-
-    # Direct NVIDIA API (blocked by sandbox egress proxy, kept as fallback)
-    api_key = os.getenv("NVIDIA_API_KEY", "")
-    if api_key:
-        return NVIDIA_API_URL, f"Bearer {api_key}", MODEL
 
     # Last resort: inference.local proxy
     return INFERENCE_URL, "Bearer dummy", MODEL
@@ -80,8 +79,8 @@ You analyze technical 3D print data and provide a detailed analysis response in 
 
 JSON schema to follow:
 {
-  "explanation": "Under 150 words professional explanation for the customer. If rejecting, state the specific physical metrics violating limits. If conditional, mention structural risks. If accepted, note print suitability.",
-  "decision_override": "ACCEPT", "CONDITIONAL", or "REJECT". You can override the recommended decision to a safer state (e.g. ACCEPT -> CONDITIONAL, or CONDITIONAL -> REJECT) if you see significant structural risk from the metrics. Otherwise, match the recommended decision.",
+  "explanation": "Under 150 words professional explanation for the customer. If rejecting due to low margin, explain that the setup time makes this part uneconomical. If rejecting for physics, state the metrics. If conditional, mention structural risks. If accepted, note print suitability.",
+  "decision_override": "ACCEPT", "CONDITIONAL", or "REJECT". You MUST override to REJECT if the Projected Margin is under $2.50. You can also override for structural risks.",
   "margin_surcharge_pct": 0.0,
   "suggested_repairs": "Suggest concrete steps the customer can take to repair the geometry if rejected or conditional. Or empty string if accepted."
 }
@@ -91,6 +90,9 @@ Respond ONLY with the raw JSON block. Do not include markdown formatting or comm
 USER_PROMPT_TEMPLATE = """Analyze this technical analysis context:
 
 RECOMMENDED DECISION: {decision}
+FINANCIAL DATA:
+- Projected Margin: ${margin:.2f}
+
 PHYSICAL DATA:
 - Volume: {volume:.2f} cm³ ({weight:.1f}g PLA)
 - Bounding box: {bbox}
@@ -124,7 +126,12 @@ def generate_reasoning(quote) -> dict:
     # Extract data from quote
     analysis = quote.get("analysis_summary", {})
     reasoning_text = quote.get("reasoning_text", "No analysis available.")
-    line_items = {item["label"]: item["cost_usd"] for item in quote.get("line_items", [])}
+    
+    margin_usd = 0.0
+    for li in quote.get("line_items", []):
+        if li.get("label", "").startswith("Margin"):
+            margin_usd = li.get("cost_usd", 0.0)
+            break
     
     # Build the user prompt
     wall = analysis.get("wall_thickness", {})
@@ -133,6 +140,7 @@ def generate_reasoning(quote) -> dict:
     
     user_prompt = USER_PROMPT_TEMPLATE.format(
         decision=quote.get("decision", "UNKNOWN"),
+        margin=margin_usd,
         reasoning_text=reasoning_text,
         volume=analysis.get("volume_cm3", 0),
         weight=analysis.get("volume_cm3", 0) * 1.24,  # PLA density ~1.24 g/cm³

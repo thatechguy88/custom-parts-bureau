@@ -15,3 +15,5 @@ ARCHITECTURE-PLAN.md
 IMPLEMENTATION_PLAN.md
 cpb-policy.yaml
 marketing_pitch.md
+*.log
+*.db-*

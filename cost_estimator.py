@@ -64,6 +64,10 @@ class CostBreakdown:
     rush_surcharge_usd: float = 0.0
     total_usd: float = 0.0
 
+    @property
+    def material_usd(self) -> float:
+        return self.material_cost_usd
+
     def to_dict(self) -> dict:
         return {
             "material_cost_usd": round(self.material_cost_usd, 4),

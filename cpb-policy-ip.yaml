@@ -1,0 +1,9 @@
+preset:
+  name: "cpb-flask-ip"
+network_policies:
+  flask_app_ip:
+    name: "CPB Flask App IP"
+    endpoints:
+      - host: "172.18.0.3"
+        port: 5001
+        access: full

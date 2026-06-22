@@ -310,6 +310,28 @@
         text-align: left;
         box-shadow: 0 0 20px rgba(255, 68, 68, 0.2);
     }
+
+    /* Live Progress Checklist */
+    .progress-stage {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: monospace;
+        font-size: 13px;
+        color: var(--text-dim);
+    }
+    .progress-stage.active {
+        color: var(--accent-blue);
+        text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+        animation: pulseText 1.5s infinite;
+    }
+    .progress-stage.done {
+        color: var(--accent-green);
+    }
+    @keyframes pulseText {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
 </style>
 {% endblock %}
 
@@ -354,6 +376,31 @@
             <div class="timeline-label-item" id="label-paid">Paid</div>
             <div class="timeline-label-item" id="label-printing">Printing</div>
             <div class="timeline-label-item" id="label-completed">Completed</div>
+        </div>
+    </div>
+
+    <!-- Live Progress Checklist -->
+    <div class="details-box" id="live-progress-box" style="display: none; border-color: var(--accent-blue); box-shadow: 0 0 15px rgba(0, 212, 255, 0.1);">
+        <div class="details-title-bar">
+            <div class="details-filename" style="color: var(--accent-blue);">Pipeline Execution</div>
+            <div class="details-badge badge-analyzing">PROCESSING</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 10px;">
+            <div class="progress-stage" id="stage-uploaded">
+                <span class="stage-icon">⏳</span> <span class="stage-text">File Uploaded & Secure</span>
+            </div>
+            <div class="progress-stage" id="stage-analyzing">
+                <span class="stage-icon">⏳</span> <span class="stage-text">Analyzing geometry & physics...</span>
+            </div>
+            <div class="progress-stage" id="stage-costing">
+                <span class="stage-icon">⏳</span> <span class="stage-text">Estimating materials & machine time...</span>
+            </div>
+            <div class="progress-stage" id="stage-reasoning">
+                <span class="stage-icon">⏳</span> <span class="stage-text">Autonomous Agent reviewing margins & physics...</span>
+            </div>
+            <div class="progress-stage" id="stage-quoted">
+                <span class="stage-icon">⏳</span> <span class="stage-text">Finalizing quote...</span>
+            </div>
         </div>
     </div>
 
@@ -411,7 +458,7 @@
         </div>
 
         <a href="/quote/{{ job_id }}" class="btn btn-cyan" id="pay-now-btn" style="width: 100%; display: none;">
-            💳 Complete Payment & Start Print
+            💳 See Full Quote & Complete Payment
         </a>
 
         <a href="/" class="btn" style="width: 100%;">
@@ -496,10 +543,13 @@
         // Show appropriate alert message
         if (data.status === 'uploaded') {
             document.getElementById('alert-uploading').style.display = 'block';
+            document.getElementById('live-progress-box').style.display = 'flex';
         } else if (data.status === 'analyzing') {
             document.getElementById('alert-analyzing').style.display = 'block';
+            document.getElementById('live-progress-box').style.display = 'flex';
         } else if (data.status === 'quoted' || data.status === 'paying') {
             document.getElementById('pay-now-btn').style.display = 'block';
+            document.getElementById('live-progress-box').style.display = 'none';
         } else if (data.status === 'paid') {
             document.getElementById('alert-paid').style.display = 'block';
         } else if (data.status === 'printing') {
@@ -565,10 +615,40 @@
         const percentMap = [0, 20, 40, 60, 80, 100];
         const percent = percentMap[currentIdx] || 0;
         document.getElementById('timeline-progress-bar').style.width = `${percent}%`;
+        // Update Live Progress Checklist if visible
+        if (document.getElementById('live-progress-box').style.display !== 'none') {
+            const stages = ['uploaded', 'analyzing', 'costing', 'reasoning', 'quoted'];
+            let currentStageIdx = stages.indexOf(data.analysis_stage);
+            if (currentStageIdx === -1) currentStageIdx = 0;
+            if (data.status === 'quoted' || data.status === 'rejected') currentStageIdx = 4;
+
+            stages.forEach((stage, idx) => {
+                const stageEl = document.getElementById(`stage-${stage}`);
+                if (!stageEl) return;
+                
+                const icon = stageEl.querySelector('.stage-icon');
+                stageEl.className = 'progress-stage';
+                
+                if (idx < currentStageIdx) {
+                    stageEl.classList.add('done');
+                    icon.textContent = '✓';
+                } else if (idx === currentStageIdx) {
+                    stageEl.classList.add('active');
+                    icon.textContent = '⟳';
+                } else {
+                    icon.textContent = '⏳';
+                }
+            });
+            
+            // Special case for rejection during processing
+            if (data.status === 'rejected') {
+                document.getElementById('live-progress-box').style.display = 'none';
+            }
+        }
     }
 
     // Run Polling
-    pollInterval = setInterval(pollStatus, 5000);
+    pollInterval = setInterval(pollStatus, 3000);
     pollStatus(); // First fetch immediately
 </script>
 {% endblock %}
