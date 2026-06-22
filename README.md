@@ -58,6 +58,7 @@ custom-parts-bureau/
 ├── app.py                  ➔ Flask Application (API routers & background threads)
 ├── models.py               ➔ Database Layer (SQLite schema & Job CRUD operations)
 ├── adapters.py             ➔ Mismatch Bridges (Adapts quote output to Stripe & Dashboard)
+├── db_sync.py              ➔ Host-side Daemon syncing the local database to the sandbox
 ├── templates/              ➔ Monospace dark-CRT style views (Jinja2)
 │   ├── base.html           ➔ Shared visual shell (scanlines, custom fonts)
 │   ├── landing.html        ➔ Drag/drop upload page
@@ -65,9 +66,8 @@ custom-parts-bureau/
 │   └── status.html         ➔ Progress bar order status
 ├── stl_analyzer.py         ➔ Ray-cast wall thickness, overhang, & watertight checks
 ├── cost_estimator.py       ➔ dynamic risk margin cost compiler
-├── quote_generator.py      ➔ Decision rules (Accept >=70, Conditional 30-70, Reject <30)
-├── nemotron_reasoning.py   ➔ NVIDIA API caller for Nemotron 3 Ultra (550B)
-└── stripe_integration.py   ➔ Stripe Checkout Session and payment links generator
+├── quote_generator.py      ➔ Prepares quote items
+├── stripe_integration.py   ➔ Stripe Checkout Session and payment links generator
 ```
 
 ---
@@ -87,13 +87,11 @@ NVIDIA_API_KEY=nvapi-...
 
 ---
 
-## 📦 Sandbox Agent Integration (NemoClaw)
+## 📦 Sandbox Agent Integration (NemoClaw & Hermes)
 
-The NemoClaw agent resides in the `openshell` container, mounting the project at `/sandbox/project`.
+The backend natively integrates with the Hermes agent running inside a NemoClaw OpenShell sandbox.
 
-1. **System Monitoring:** The agent can poll server health via:
-   `curl -s http://172.18.0.1:8080/api/dashboard-data`
-2. **Quote Quality Audits:** The agent can run python QA scripts directly against the shared database file:
-   `/sandbox/project/cpb.db`
-3. **Internal Run:** The agent can run testing cycles inside its container using the virtualenv:
-   `/sandbox/venv/bin/python /sandbox/project/app.py`
+1. **Event-Driven Trigger**: Flask triggers the agent via a signed HTTP Webhook (`job.created`) when a new STL is processed.
+2. **Air-Gapped Decisions**: The Hermes agent reads the job from its local SQLite database, performs reasoning, and writes the decision back to the local `cpb.db`.
+3. **Database Sync**: The `db_sync.py` utility syncs the SQLite database back to the host machine.
+4. **Local Poller**: A background thread in `app.py` detects the decision and advances the pipeline state to `quoted`, allowing the customer to checkout without relying on inbound proxy connections.
