@@ -266,7 +266,6 @@ def run_pipeline(job_id, stl_path, material="PLA", rush=False):
         update_job(
             job_id,
             status="analyzing",
-            decision=quote.decision.value,
             confidence=analysis.structural_confidence,
             volume_cm3=analysis.volume_cm3,
             surface_area_cm2=analysis.surface_area_cm2,
