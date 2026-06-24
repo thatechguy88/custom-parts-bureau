@@ -197,14 +197,14 @@ def db_decision_poller():
     while True:
         try:
             conn = _get_conn()
-            cursor = conn.execute("SELECT id, decision, reasoning_text FROM jobs WHERE decision IS NOT NULL AND status IN ('analyzing', 'reviewed')")
+            cursor = conn.execute("SELECT id, agent_decision, agent_reasoning FROM jobs WHERE agent_decision IS NOT NULL AND status IN ('analyzing', 'reviewed')")
             jobs = cursor.fetchall()
             conn.close()
 
             for job in jobs:
                 job_id = job["id"]
-                decision = job["decision"]
-                reasoning = job["reasoning_text"]
+                decision = job["agent_decision"]
+                reasoning = job["agent_reasoning"]
                 
                 # Sync database status based on decision
                 status = "rejected" if decision == "REJECT" else "quoted"
@@ -212,6 +212,8 @@ def db_decision_poller():
                 update_job(
                     job_id,
                     status=status,
+                    decision=decision,
+                    nemotron_explanation=reasoning,
                     analysis_stage=status
                 )
                 
