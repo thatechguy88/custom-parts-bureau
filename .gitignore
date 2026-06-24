@@ -17,3 +17,4 @@ cpb-policy.yaml
 marketing_pitch.md
 *.log
 *.db-*
+.env.bak

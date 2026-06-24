@@ -91,7 +91,8 @@ NVIDIA_API_KEY=nvapi-...
 
 The backend natively integrates with the Hermes agent running inside a NemoClaw OpenShell sandbox.
 
-1. **Event-Driven Trigger**: Flask triggers the agent via a signed HTTP Webhook (`job.created`) when a new STL is processed.
-2. **Air-Gapped Decisions**: The Hermes agent reads the job from its local SQLite database, performs reasoning, and writes the decision back to the local `cpb.db`.
-3. **Database Sync**: The `db_sync.py` utility syncs the SQLite database back to the host machine.
-4. **Local Poller**: A background thread in `app.py` detects the decision and advances the pipeline state to `quoted`, allowing the customer to checkout without relying on inbound proxy connections.
+1. **Event-Driven Trigger**: Flask triggers the agent via a signed HTTP Webhook (`job.created`) when a new STL is processed. This webhook hits a Cloudflare tunnel pointing to port 8642.
+2. **Internal Proxy Routing**: Inside the sandbox, a custom Python reverse proxy (which replaces the default socat) intercepts the traffic. It routes `/webhooks/*` endpoints to the Hermes webhook platform (8644) and routes everything else to the main API server (18642).
+3. **Air-Gapped Decisions**: The Hermes agent reads the job from its local SQLite database, performs reasoning, and makes a decision based on the business rules.
+4. **Callback with Bypass**: Hermes generates a JSON payload with its decision and uses Python's `urllib` to send an HTTP POST request back to the Flask app via Ngrok. The strict NemoClaw proxy permits this request because of a custom network policy allowing `*.ngrok-free.app`. Hermes also attaches the `ngrok-skip-browser-warning: 1` header to successfully bypass the Ngrok free tier interstitial page.
+5. **Database Sync & Local Poller**: The HTTP POST hits `/api/agent-decide/<job_id>` on the Flask app, which updates the SQLite database with the decision. A background thread detects the decision and advances the pipeline state to `quoted`, allowing the customer to checkout without relying on inbound proxy connections.

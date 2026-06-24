@@ -1,0 +1,8 @@
+preset:
+  name: ngrok-callback
+network_policies:
+  ngrok-callback:
+    endpoints:
+      - host: "*.ngrok-free.app"
+        port: 443
+        access: full

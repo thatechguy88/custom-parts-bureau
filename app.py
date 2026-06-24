@@ -127,7 +127,7 @@ def trigger_agent_review(job_id, filename, email, margin, min_wall, confidence):
             NEMOCLAW_HMAC_SECRET.encode('utf-8'),
             payload_bytes, hashlib.sha256
         ).hexdigest()
-        headers["X-Webhook-Signature"] = signature
+        headers["X-Hub-Signature-256"] = f"sha256={signature}"
 
     # Ensure webhook URL ends with the correct path
     webhook_url = NEMOCLAW_WEBHOOK_URL
